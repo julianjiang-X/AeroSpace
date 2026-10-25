@@ -7,6 +7,10 @@ let signposter = OSSignposter(subsystem: aeroSpaceAppId, category: .pointsOfInte
 
 let myPid = NSRunningApplication.current.processIdentifier
 let lockScreenAppBundleId = "com.apple.loginwindow"
+// The standalone compatibility harness owns pausing/restoring the installed
+// server and window geometry. Never apply this override to a release build.
+let compatHarnessOwnsLifecycle = isDebug &&
+    ProcessInfo.processInfo.environment["AEROSPACE_COMPAT_EXTERNAL_LIFECYCLE"] == "1"
 
 func interceptTermination(_ _signal: Int32) {
     signal(_signal, { (signal: Int32) in
@@ -26,6 +30,7 @@ func initTerminationHandler() {
 private struct AppServerTerminationHandler: TerminationHandler {
     @MainActor
     func beforeTermination() {
+        if compatHarnessOwnsLifecycle { return }
         // Make all windows fullscreen before Quit
         for window in MacWindow.allWindowsMap.values {
             // makeAllWindowsVisibleAndRestoreSize may be invoked when something went wrong (e.g. some windows are unbound)

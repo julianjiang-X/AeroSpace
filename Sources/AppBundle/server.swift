@@ -18,6 +18,7 @@ func startUnixSocketServer() {
 }
 
 func toggleReleaseServerIfDebug(_ state: EnableCmdArgs.State) async {
+    if compatHarnessOwnsLifecycle { return }
     if serverArgs.isReadOnly { return }
     if !isDebug { return }
     let socketFile = "/tmp/\(stableAeroSpaceAppId)-\(unixUserName).sock"

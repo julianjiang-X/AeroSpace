@@ -72,7 +72,7 @@ enum YaaglLauncherProcessIdentity {
     }
 
     private static func processExecutablePath(_ pid: pid_t) -> String? {
-        var bytes = [CChar](repeating: 0, count: Int(PROC_PIDPATHINFO_MAXSIZE))
+        var bytes = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
         let count = unsafe bytes.withUnsafeMutableBytes {
             unsafe proc_pidpath(pid, $0.baseAddress, UInt32($0.count))
         }

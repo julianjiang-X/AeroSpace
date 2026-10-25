@@ -253,8 +253,8 @@ final class MacApp: AbstractApp {
         try await thread?.runInLoop(cm) { [axApp, yaaglGameCompatibility, yaaglLauncherProfile, nsApp, pid] job in
             var result = dumpAxRecursive(axApp.threadGuarded, .app)
             result["Aero.YaaglLauncherProcessIdentity"] = .dict([
-                "reportedPID": .int(nsApp.processIdentifier),
-                "resolvedPID": .int(pid),
+                "reportedPID": .int(Int(nsApp.processIdentifier)),
+                "resolvedPID": .int(Int(pid)),
                 "fallbackBundleID": .stringOrNull(yaaglLauncherProfile?.bundleID),
             ])
             result["Aero.YaaglGameCompatibility"] = .dict([

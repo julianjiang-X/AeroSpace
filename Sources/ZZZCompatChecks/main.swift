@@ -84,10 +84,15 @@ final class YaaglGameOfflineCases {
     private let gameArgument = "Z:\\Users\\fixture\\Games\\ZZZ\\ZenlessZoneZero.exe"
     private let hsrWineURL = URL(filePath: "/fixture/Yaagl HSR/wine/lib/wine/x86_64-unix/wine")
     private let hsrGameArgument = "Z:\\Users\\fixture\\Games\\HSR\\StarRail.exe"
+    private let giWineURL = URL(filePath: "/fixture/Yaagl/wine/lib/wine/x86_64-unix/wine")
+    private let giGameArgument = "Z:\\Users\\fixture\\Games\\GI\\YuanShen.exe"
 
     private func profile(game: YaaglGameCompatibilityProfile.Game = .zzz) throws -> YaaglGameCompatibilityProfile {
-        let wineURL = game == .zzz ? self.wineURL : hsrWineURL
-        let argument = game == .zzz ? gameArgument : hsrGameArgument
+        let (wineURL, argument) = switch game {
+            case .zzz: (self.wineURL, gameArgument)
+            case .hsr: (hsrWineURL, hsrGameArgument)
+            case .gi: (giWineURL, giGameArgument)
+        }
         return try checks.require(YaaglGameCompatibilityProfile.detect(
             game: game,
             enabled: true,
@@ -278,6 +283,91 @@ final class YaaglGameOfflineCases {
         ))
     }
 
+    func testGIAcceptsOnlyKnownClientExecutables() {
+        for executable in ["YuanShen.exe", "GenshinImpact.exe"] {
+            checks.expectNotNil(YaaglGameCompatibilityProfile.detect(
+                game: .gi, enabled: true, executableURL: giWineURL,
+                expectedWineExecutableURL: giWineURL,
+                arguments: { ["wine", "Z:\\Games\\GI\\\(executable)"] },
+            ))
+        }
+        for arguments in [
+            ["UnityCrashHandler64.exe", giGameArgument],
+            ["StarRail.exe"], [gameArgument], ["OtherGenshinImpact.exe"],
+            ["GenshinImpact.exe.helper"], ["YuanShen.exe Launcher.exe"],
+        ] {
+            checks.expectNil(YaaglGameCompatibilityProfile.detect(
+                game: .gi, enabled: true, executableURL: giWineURL,
+                expectedWineExecutableURL: giWineURL, arguments: { arguments },
+            ))
+        }
+        checks.expectNil(YaaglGameCompatibilityProfile.detect(
+            game: .gi, enabled: false, executableURL: giWineURL,
+            expectedWineExecutableURL: giWineURL, arguments: { [self.giGameArgument] },
+        ))
+        checks.expectNil(YaaglGameCompatibilityProfile.detect(
+            game: .gi, enabled: true, executableURL: hsrWineURL,
+            expectedWineExecutableURL: giWineURL, arguments: { [self.giGameArgument] },
+        ))
+        for game in [YaaglGameCompatibilityProfile.Game.zzz, .hsr] {
+            checks.expectNil(YaaglGameCompatibilityProfile.detect(
+                game: game, enabled: true, executableURL: giWineURL,
+                expectedWineExecutableURL: giWineURL, arguments: { [self.giGameArgument] },
+            ))
+        }
+    }
+
+    func testGIKnownMainWindowTitlesStayFloatingWithoutFocus() throws {
+        let profile = try profile(game: .gi)
+        checks.expectEqual(profile.identifier, "yaagl-gi-main-v1")
+        for title in ["原神", "Genshin Impact"] {
+            for focused in [true, false] {
+                let window = fixtureWindow(title: title, focused: focused)
+                for level in [MacOsWindowLevel.unknown(windowLevel: 26), .normalWindow] {
+                    checks.expectTrue(window.isWindowHeuristic(
+                        axApp: FixtureAxElement(fields: [:]), nil, .regular, level,
+                        yaaglGameCompatibility: profile,
+                    ))
+                    checks.expectEqual(window.getWindowType(
+                        axApp: FixtureAxElement(fields: [:]), nil, .regular, level,
+                        yaaglGameCompatibility: profile,
+                    ), .dialog)
+                }
+            }
+        }
+    }
+
+    func testGIRejectsUnverifiedAndAuxiliaryWindows() throws {
+        let profile = try profile(game: .gi)
+        for window in [
+            fixtureWindow(title: ""),
+            fixtureWindow(title: "原神 Launcher"),
+            fixtureWindow(title: "Genshin Impact Launcher"),
+            fixtureWindow(title: "genshin impact"),
+            fixtureWindow(title: "Honkai: Star Rail"),
+            fixtureWindow(title: "ZenlessZoneZero"),
+            fixtureWindow(title: "原神", size: CGSize(width: 1920, height: 30)),
+            fixtureWindow(title: "Genshin Impact", size: CGSize(width: 64, height: 64)),
+            fixtureWindow(title: "原神", nativeFullscreen: true),
+        ] {
+            checks.expectEqual(window.getWindowType(
+                axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow,
+                yaaglGameCompatibility: profile,
+            ), .popup)
+        }
+        for title in ["原神", "Genshin Impact"] {
+            checks.expectEqual(fixtureWindow(title: title).getWindowType(
+                axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow,
+            ), .popup)
+            for otherGame in [YaaglGameCompatibilityProfile.Game.zzz, .hsr] {
+                checks.expectEqual(fixtureWindow(title: title).getWindowType(
+                    axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow,
+                    yaaglGameCompatibility: try self.profile(game: otherGame),
+                ), .popup)
+            }
+        }
+    }
+
     private func processArgumentsFixture(_ arguments: [String]) -> Data {
         var argc = Int32(arguments.count)
         var result = unsafe withUnsafeBytes(of: &argc) { unsafe Data($0) }
@@ -385,6 +475,9 @@ checks.run("testProcessArgumentsParserStopsBeforeEnvironment") { cases.testProce
 checks.run("testHSRMainWindowStaysFloatingWhenUnfocusedAndLevelChanges") { try cases.testHSRMainWindowStaysFloatingWhenUnfocusedAndLevelChanges() }
 checks.run("testHSRRejectsThinAndUnnamedAuxiliaryWindows") { try cases.testHSRRejectsThinAndUnnamedAuxiliaryWindows() }
 checks.run("testGameProfilesCannotCrossMatch") { try cases.testGameProfilesCannotCrossMatch() }
+checks.run("testGIAcceptsOnlyKnownClientExecutables") { cases.testGIAcceptsOnlyKnownClientExecutables() }
+checks.run("testGIKnownMainWindowTitlesStayFloatingWithoutFocus") { try cases.testGIKnownMainWindowTitlesStayFloatingWithoutFocus() }
+checks.run("testGIRejectsUnverifiedAndAuxiliaryWindows") { try cases.testGIRejectsUnverifiedAndAuxiliaryWindows() }
 let repoRoot = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 checks.run("upstream axDumps corpus") { try checkUpstreamAxDumps(repoRoot.appending(path: "axDumps"), checks) }
 print("Offline checks: \(checks.groups) groups, \(checks.assertions) assertions, \(checks.fixtures) upstream fixtures, \(checks.failures) failures")

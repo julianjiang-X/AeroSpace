@@ -2,35 +2,42 @@ import AppKit
 import Darwin
 import Foundation
 
-/// Opt-in compatibility for the observed Yaagl game Wine main windows only.
+/// Opt-in compatibility for narrowly identified Yaagl game Wine main windows only.
 /// Process arguments are read once when MacApp is registered, never logged.
 struct YaaglGameCompatibilityProfile: Sendable {
     enum Game: String, CaseIterable, Sendable {
         case zzz
         case hsr
+        case gi
 
         var environmentKey: String {
             switch self {
                 case .zzz: "AEROSPACE_YAAGL_ZZZ_COMPAT"
                 case .hsr: "AEROSPACE_YAAGL_HSR_COMPAT"
+                case .gi: "AEROSPACE_YAAGL_GI_COMPAT"
             }
         }
         var wineDirectory: String {
             switch self {
                 case .zzz: "Yaagl ZZZ OS"
                 case .hsr: "Yaagl HSR"
+                case .gi: "Yaagl"
             }
         }
-        var windowsExecutable: String {
+        var windowsExecutables: [String] {
             switch self {
-                case .zzz: "zenlesszonezero.exe"
-                case .hsr: "starrail.exe"
+                case .zzz: ["zenlesszonezero.exe"]
+                case .hsr: ["starrail.exe"]
+                case .gi: ["yuanshen.exe", "genshinimpact.exe"]
             }
         }
         var mainWindowTitles: [String] {
             switch self {
                 case .zzz: ["ZenlessZoneZero"]
                 case .hsr: ["Honkai: Star Rail", "崩坏：星穹铁道"]
+                // Exact Chinese/global client names; this local GI installation
+                // has no observed running main window yet.
+                case .gi: ["原神", "Genshin Impact"]
             }
         }
     }
@@ -73,8 +80,9 @@ struct YaaglGameCompatibilityProfile: Sendable {
               expectedWineExecutableURL.standardizedFileURL.resolvingSymlinksInPath(),
               let arguments = arguments(),
               let firstExecutable = arguments.first(where: { $0.lowercased().hasSuffix(".exe") }),
-              firstExecutable.replacingOccurrences(of: "\\", with: "/")
-                  .split(separator: "/").last?.lowercased() == game.windowsExecutable
+              let executableName = firstExecutable.replacingOccurrences(of: "\\", with: "/")
+                  .split(separator: "/").last?.lowercased(),
+              game.windowsExecutables.contains(executableName)
         else { return nil }
         return Self(game: game)
     }

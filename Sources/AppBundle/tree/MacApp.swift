@@ -242,6 +242,7 @@ final class MacApp: AbstractApp {
             result["Aero.YaaglGameCompatibility"] = .dict([
                 "zzzEnabled": .bool(YaaglGameCompatibilityProfile.enabledGames.contains(.zzz)),
                 "hsrEnabled": .bool(YaaglGameCompatibilityProfile.enabledGames.contains(.hsr)),
+                "giEnabled": .bool(YaaglGameCompatibilityProfile.enabledGames.contains(.gi)),
                 "processProfile": .stringOrNull(yaaglGameCompatibility?.identifier),
             ])
             return result

@@ -157,6 +157,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "focus-follows-mouse": Parser(\.focusFollowsMouse, parseFocusFollowsMouse),
     "workspace-to-monitor-force-assignment": Parser(\.workspaceToMonitorForceAssignment, parseWorkspaceToMonitorAssignment),
     "on-window-detected": Parser(\.onWindowDetected, parseOnWindowDetectedArray),
+    "compatibility-rules": Parser(\.compatibilityRules, parseCompatibilityRules),
 
     // Deprecated
     "non-empty-workspaces-root-containers-layout-on-startup": Parser(\._nonEmptyWorkspacesRootContainersLayoutOnStartup, parseStartupRootContainerLayout),

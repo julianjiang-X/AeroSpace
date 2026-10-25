@@ -25,16 +25,17 @@ final class AxSubscription {
     }
 
     static func bulkSubscribe(
-        _ nsApp: NSRunningApplication,
+        _ pid: pid_t,
         _ ax: AXUIElement,
         _ job: RunLoopJob,
         _ handlerToNotifKeyMapping: HandlerToNotifKeyMapping,
     ) throws -> [AxSubscription] {
+        guard pid > 0 else { return [] }
         var result: [AxSubscription] = []
         var visitedNotifKeys: Set<String> = []
         for unsafe (handler, notifKeys) in unsafe handlerToNotifKeyMapping {
             try job.checkCancellation()
-            guard let obs = unsafe AXObserver.new(nsApp.processIdentifier, handler) else { return [] }
+            guard let obs = unsafe AXObserver.new(pid, handler) else { return [] }
             let subscription = AxSubscription(obs: obs, ax: ax)
             for key: String in notifKeys {
                 try job.checkCancellation()

@@ -1,4 +1,4 @@
-// Generated from YaaglGameCompatibilityTest.swift and the upstream AX fixture adapter.
+// Generated from the Yaagl game/launcher compatibility tests and upstream AX fixture adapter.
 // Regenerate with ../../zzz-compat-test/generate-offline-checks.py after changing tests.
 // This is a focused offline runner, not the complete XCTest suite.
 #if DEBUG
@@ -442,6 +442,83 @@ private struct FixtureAxElement: AxUiElementMock {
     func containingWindowId() -> CGWindowID? { 42 }
 }
 
+
+final class YaaglLauncherOfflineCases {
+    let checks: CheckRunner
+    init(_ checks: CheckRunner) { self.checks = checks }
+    func testPositiveNativePIDBypassesLauncherFallback() {
+        var reads = 0
+        let result = YaaglLauncherProcessIdentity.resolve(
+            reportedPID: 42, bundleID: nil, bundleURL: nil, executableURL: nil,
+            ownerPIDs: { reads += 1; return [] },
+            processPath: { _ in reads += 1; return nil },
+        )
+        checks.expectEqual(result?.pid, 42)
+        checks.expectNil(result?.profile)
+        checks.expectEqual(reads, 0)
+    }
+
+    func testEachKnownLauncherRecoversOneVerifiedWindowOwner() {
+        for profile in YaaglLauncherProcessIdentity.profiles {
+            let reportedPIDs: [Int32] = [-1, 0]
+            for reportedPID in reportedPIDs {
+                let result = YaaglLauncherProcessIdentity.resolve(
+                    reportedPID: reportedPID,
+                    bundleID: profile.bundleID,
+                    bundleURL: URL(filePath: profile.bundlePath),
+                    executableURL: URL(filePath: profile.executablePath),
+                    ownerPIDs: { [-1, 0, 101, 101, 202] },
+                    processPath: { $0 == 101 ? profile.executablePath : "/Applications/Other.app/Contents/MacOS/Yaagl" },
+                )
+                checks.expectEqual(result?.pid, 101)
+                checks.expectEqual(result?.profile, profile)
+            }
+        }
+    }
+
+    func testUnrecognizedOrMismatchedBundleMetadataNeverReadsProcesses() {
+        let profile = YaaglLauncherProcessIdentity.profiles[0]
+        var reads = 0
+        let metadata: [(String?, URL?, URL?)] = [
+            (nil, URL(filePath: profile.bundlePath), URL(filePath: profile.executablePath)),
+            ("com.tencent.xinWeChat", URL(filePath: profile.bundlePath), URL(filePath: profile.executablePath)),
+            (profile.bundleID, nil, URL(filePath: profile.executablePath)),
+            (profile.bundleID, URL(filePath: profile.bundlePath), nil),
+            (profile.bundleID, URL(filePath: "/tmp/Yaagl.app"), URL(filePath: profile.executablePath)),
+            (profile.bundleID, URL(filePath: profile.bundlePath), URL(filePath: profile.bundlePath + "/Contents/MacOS/parameterized")),
+            (profile.bundleID, URL(filePath: profile.bundlePath), URL(filePath: profile.executablePath + "Helper")),
+        ]
+        for (bundleID, bundleURL, executableURL) in metadata {
+            checks.expectNil(YaaglLauncherProcessIdentity.resolve(
+                reportedPID: -1, bundleID: bundleID, bundleURL: bundleURL, executableURL: executableURL,
+                ownerPIDs: { reads += 1; return [101] },
+                processPath: { _ in reads += 1; return profile.executablePath },
+            ))
+        }
+        checks.expectEqual(reads, 0)
+    }
+
+    func testMissingWrongAndAmbiguousOwnerIdentitiesFailClosed() {
+        let profile = YaaglLauncherProcessIdentity.profiles[0]
+        let cases: [([Int32], [Int32: String])] = [
+            ([], [:]),
+            ([-1, 0], [:]),
+            ([101], [:]),
+            ([101], [101: "/Applications/WeChat.app/Contents/MacOS/WeChat"]),
+            ([101], [101: profile.executablePath + "Helper"]),
+            ([101], [101: YaaglLauncherProcessIdentity.profiles[1].executablePath]),
+            ([101, 202], [101: profile.executablePath, 202: profile.executablePath]),
+        ]
+        for (owners, paths) in cases {
+            checks.expectNil(YaaglLauncherProcessIdentity.resolve(
+                reportedPID: -1, bundleID: profile.bundleID,
+                bundleURL: URL(filePath: profile.bundlePath), executableURL: URL(filePath: profile.executablePath),
+                ownerPIDs: { owners }, processPath: { paths[$0] },
+            ))
+        }
+    }
+}
+
 extension [String: Json]: AxUiElementMock {
     public func get<Attr>(_ attr: Attr) -> Attr.T? where Attr: ReadableAttr {
         guard let value = self[attr.key] else {
@@ -506,6 +583,7 @@ private func fixtureAxObject(_ value: Json) -> [String: Json]? {
 
 let checks = CheckRunner()
 let cases = YaaglGameOfflineCases(checks)
+let launcherCases = YaaglLauncherOfflineCases(checks)
 checks.run("testCompatibilityFlagsDefaultOffAndAcceptOnlyBooleanMetadata") { cases.testCompatibilityFlagsDefaultOffAndAcceptOnlyBooleanMetadata() }
 checks.run("testExplicitCompatibilityFlagsOverrideBundleDefaults") { cases.testExplicitCompatibilityFlagsOverrideBundleDefaults() }
 checks.run("testCompatibilityFlagsRemainIndependentForEveryLaunchMethod") { cases.testCompatibilityFlagsRemainIndependentForEveryLaunchMethod() }
@@ -521,6 +599,10 @@ checks.run("testGameProfilesCannotCrossMatch") { try cases.testGameProfilesCanno
 checks.run("testGIAcceptsOnlyKnownClientExecutables") { cases.testGIAcceptsOnlyKnownClientExecutables() }
 checks.run("testGIKnownMainWindowTitlesStayFloatingWithoutFocus") { try cases.testGIKnownMainWindowTitlesStayFloatingWithoutFocus() }
 checks.run("testGIRejectsUnverifiedAndAuxiliaryWindows") { try cases.testGIRejectsUnverifiedAndAuxiliaryWindows() }
+checks.run("testPositiveNativePIDBypassesLauncherFallback") { launcherCases.testPositiveNativePIDBypassesLauncherFallback() }
+checks.run("testEachKnownLauncherRecoversOneVerifiedWindowOwner") { launcherCases.testEachKnownLauncherRecoversOneVerifiedWindowOwner() }
+checks.run("testUnrecognizedOrMismatchedBundleMetadataNeverReadsProcesses") { launcherCases.testUnrecognizedOrMismatchedBundleMetadataNeverReadsProcesses() }
+checks.run("testMissingWrongAndAmbiguousOwnerIdentitiesFailClosed") { launcherCases.testMissingWrongAndAmbiguousOwnerIdentitiesFailClosed() }
 let repoRoot = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 checks.run("upstream axDumps corpus") { try checkUpstreamAxDumps(repoRoot.appending(path: "axDumps"), checks) }
 print("Offline checks: \(checks.groups) groups, \(checks.assertions) assertions, \(checks.fixtures) upstream fixtures, \(checks.failures) failures")

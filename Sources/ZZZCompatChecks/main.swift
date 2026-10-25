@@ -1,5 +1,5 @@
 // Generated from compatibility tests and the upstream AX fixture adapter.
-// Regenerate with ../../compatibility-rules/generate-offline-checks.py after changing tests.
+// Regenerate with python3 script/generate-compatibility-checks.py <repo-root>.
 // This is a focused offline runner, not the complete XCTest suite.
 #if DEBUG
 import AppKit
@@ -9,20 +9,24 @@ import Foundation
 
 struct FailedCheck: Error { let message: String }
 
+@MainActor
 final class CheckRunner {
     var assertions = 0
     var failures = 0
     var groups = 0
     var fixtures = 0
 
-    func expectNil<T>(_ value: T?, file: StaticString = #filePath, line: UInt = #line) {
-        record(value == nil, "expected nil", file, line)
+    func expectNil<T>(_ value: T?, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+        record(value == nil, "\(message) expected nil", file, line)
     }
-    func expectNotNil<T>(_ value: T?, file: StaticString = #filePath, line: UInt = #line) {
-        record(value != nil, "expected non-nil", file, line)
+    func expectNotNil<T>(_ value: T?, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+        record(value != nil, "\(message) expected non-nil", file, line)
     }
-    func expectTrue(_ value: Bool, file: StaticString = #filePath, line: UInt = #line) {
-        record(value, "expected true", file, line)
+    func expectTrue(_ value: Bool, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+        record(value, "\(message) expected true", file, line)
+    }
+    func expectFalse(_ value: Bool, _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
+        record(!value, "\(message) expected false", file, line)
     }
     func expectEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String = "",
                                    file: StaticString = #filePath, line: UInt = #line) {
@@ -40,7 +44,7 @@ final class CheckRunner {
             print("FAIL \(file):\(line): \(message)")
         }
     }
-    func run(_ name: String, _ body: () throws -> Void) {
+    func run(_ name: String, _ body: @MainActor () throws -> Void) {
         groups += 1
         let before = failures
         do { try body() }
@@ -49,6 +53,7 @@ final class CheckRunner {
     }
 }
 
+@MainActor
 func checkUpstreamAxDumps(_ dir: URL, _ checks: CheckRunner) throws {
     let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
         .sorted { $0.path < $1.path }
@@ -77,6 +82,7 @@ func checkUpstreamAxDumps(_ dir: URL, _ checks: CheckRunner) throws {
 }
 
 
+@MainActor
 final class CompatibilityOfflineCases {
     let checks: CheckRunner
     init(_ checks: CheckRunner) { self.checks = checks }
@@ -363,6 +369,220 @@ private final class CountingAxElement: AxUiElementMock {
     func containingWindowId() -> CGWindowID? { nil }
 }
 
+
+@MainActor
+final class CompatibilityConfigOfflineCases {
+    let checks: CheckRunner
+    init(_ checks: CheckRunner) { self.checks = checks }
+    private let appRule = """
+    [[compatibility-rules]]
+    id = 'wrapped-launcher'
+    phase = 'application'
+    match = { app-id = 'example.launcher', bundle-path = '/Applications/Launcher.app', executable-path = '/Applications/Launcher.app/Contents/MacOS/Launcher' }
+    action = { recover-pid = 'window-owner' }
+    """
+
+    private let windowRule = """
+    [[compatibility-rules]]
+    id = 'game-main'
+    phase = 'window'
+    match = { executable-path = '/opt/game/wine', app-id-absent = true, first-exe-argument = ['Game.exe'], window-title = ['Game'], ax-role = 'AXWindow', ax-subrole = 'AXUnknown', activation-policy = 'regular', native-fullscreen = false, window-level = [0, 26], min-size = [640, 360] }
+    action = { classify = 'floating' }
+    """
+
+    private func parse(_ rules: String) -> ParseConfigResult {
+        parseConfig("config-version = 2\n" + rules)
+    }
+
+    func testValidRuleTypesAndExactValues() {
+        let result = parse(appRule + "\n" + windowRule)
+        checks.expectTrue(result.errors.isEmpty, "\(result.errors)")
+        checks.expectEqual(result.config.compatibilityRules.count, 2)
+        guard result.config.compatibilityRules.count == 2 else { return }
+        let app = result.config.compatibilityRules[0]
+        checks.expectEqual(app.id, "wrapped-launcher")
+        checks.expectEqual(app.phase, .application)
+        checks.expectEqual(app.match.appId, "example.launcher")
+        checks.expectEqual(app.match.bundlePath, "/Applications/Launcher.app")
+        checks.expectEqual(app.match.executablePath, "/Applications/Launcher.app/Contents/MacOS/Launcher")
+        checks.expectEqual(app.action.recoverPid, .windowOwner)
+        checks.expectNil(app.action.classify)
+        let window = result.config.compatibilityRules[1]
+        checks.expectEqual(window.phase, .window)
+        checks.expectEqual(window.match.firstExeArgument, ["Game.exe"])
+        checks.expectEqual(window.match.windowTitle, ["Game"])
+        checks.expectEqual(window.match.axRole, "AXWindow")
+        checks.expectEqual(window.match.axSubrole, "AXUnknown")
+        checks.expectEqual(window.match.activationPolicy, .regular)
+        checks.expectEqual(window.match.nativeFullscreen, false)
+        checks.expectEqual(window.match.appIdAbsent, true)
+        checks.expectEqual(window.match.windowLevel, [0, 26])
+        checks.expectEqual(window.match.minSize, [640.0, 360.0])
+        checks.expectEqual(window.action.classify, .floating)
+        checks.expectNil(window.action.recoverPid)
+    }
+
+    func testOptionalWindowFieldsAndEmptyRuleList() {
+        let minimal = """
+        [[compatibility-rules]]
+        id = 'identified-window'
+        phase = 'window'
+        match = { app-id = 'example.app', window-title = ['Main'], ax-role = 'AXWindow', ax-subrole = 'AXUnknown' }
+        action = { classify = 'floating' }
+        """
+        checks.expectTrue(parse(minimal).errors.isEmpty)
+        checks.expectTrue(parse("compatibility-rules = []").errors.isEmpty)
+        checks.expectEqual(parse("").config.compatibilityRules, [])
+    }
+
+    func testHomePathsExpandButOtherRelativePathsAreRejected() {
+        let result = parse(appRule.replacingOccurrences(of: "'/Applications/Launcher.app'", with: "'~/Applications/Launcher.app'"))
+        checks.expectTrue(result.errors.isEmpty)
+        checks.expectEqual(result.config.compatibilityRules.first?.match.bundlePath, NSHomeDirectory() + "/Applications/Launcher.app")
+        let homeWindow = parse(windowRule.replacingOccurrences(of: "'/opt/game/wine'", with: "'~/Games/wine'"))
+        checks.expectTrue(homeWindow.errors.isEmpty)
+        checks.expectEqual(homeWindow.config.compatibilityRules.first?.match.executablePath, NSHomeDirectory() + "/Games/wine")
+    }
+
+    func testRejectsUnknownKeysAtEveryRuleTable() {
+        for (original, replacement) in [
+            ("phase = 'application'", "phase = 'application'\nunknown = true"),
+            ("match = { app-id", "match = { mystery = true, app-id"),
+            ("action = { recover-pid", "action = { mystery = true, recover-pid"),
+        ] {
+            let result = parse(appRule.replacingOccurrences(of: original, with: replacement))
+            checks.expectTrue(result.errors.contains { $0.message == "Unknown key" }, "\(result.errors)")
+            checks.expectTrue(result.config.compatibilityRules.isEmpty)
+        }
+    }
+
+    func testApplicationIdentityAndPhaseAreStrict() {
+        let invalidRules = [
+            appRule.replacingOccurrences(of: "id = 'wrapped-launcher'", with: "id = ''"),
+            appRule.replacingOccurrences(of: "id = 'wrapped-launcher'", with: ""),
+            appRule.replacingOccurrences(of: "phase = 'application'", with: "phase = 'unknown'"),
+            appRule.replacingOccurrences(of: "phase = 'application'", with: ""),
+            appRule.replacingOccurrences(of: "app-id = 'example.launcher', ", with: ""),
+            appRule.replacingOccurrences(of: "bundle-path = '/Applications/Launcher.app', ", with: ""),
+            appRule.replacingOccurrences(of: ", executable-path = '/Applications/Launcher.app/Contents/MacOS/Launcher'", with: ""),
+            appRule.replacingOccurrences(of: "'/Applications/Launcher.app'", with: "'Applications/Launcher.app'"),
+            appRule.replacingOccurrences(of: "'/Applications/Launcher.app/Contents/MacOS/Launcher'", with: "'Launcher'"),
+            appRule.replacingOccurrences(of: "match = {", with: "match = { window-title = ['Game'],"),
+            appRule.replacingOccurrences(of: "recover-pid = 'window-owner'", with: "classify = 'floating'"),
+            appRule.replacingOccurrences(of: "'window-owner'", with: "'any-process'"),
+            appRule.replacingOccurrences(of: "action = { recover-pid = 'window-owner' }", with: "action = {}"),
+            appRule.replacingOccurrences(of: "action = { recover-pid = 'window-owner' }", with: ""),
+            appRule.replacingOccurrences(of: "match = { app-id = 'example.launcher', bundle-path = '/Applications/Launcher.app', executable-path = '/Applications/Launcher.app/Contents/MacOS/Launcher' }", with: "match = false"),
+        ]
+        for rules in invalidRules {
+            let result = parse(rules)
+            checks.expectFalse(result.errors.isEmpty, rules)
+            checks.expectTrue(result.config.compatibilityRules.isEmpty, rules)
+        }
+        checks.expectFalse(parse(appRule + "\n" + appRule).errors.isEmpty)
+    }
+
+    func testWindowMatchAndActionsAreStrict() {
+        let mutations = [
+            ("executable-path = '/opt/game/wine', ", ""),
+            ("'/opt/game/wine'", "'wine'"),
+            ("window-title = ['Game'], ", ""),
+            ("ax-role = 'AXWindow', ", ""),
+            ("ax-subrole = 'AXUnknown', ", ""),
+            ("app-id-absent = true", "app-id = 'example.app', app-id-absent = true"),
+            ("app-id-absent = true", "app-id-absent = 1"),
+            ("['Game.exe']", "[]"),
+            ("['Game.exe']", "['dir/Game.exe']"),
+            ("['Game.exe']", "['dir\\Game.exe']"),
+            ("['Game.exe']", "['Game']"),
+            ("['Game.exe']", "['.exe']"),
+            ("['Game']", "[]"),
+            ("['Game']", "['']"),
+            ("['Game']", "[1]"),
+            ("'regular'", "'accessory'"),
+            ("native-fullscreen = false", "native-fullscreen = 'false'"),
+            ("[0, 26]", "[]"),
+            ("[0, 26]", "['0']"),
+            ("[640, 360]", "[]"),
+            ("[640, 360]", "[640]"),
+            ("[640, 360]", "[640, 360, 1]"),
+            ("[640, 360]", "[0, 360]"),
+            ("[640, 360]", "[-1, 360]"),
+            ("[640, 360]", "[640.5, 360]"),
+            ("[640, 360]", "[inf, 360]"),
+            ("[640, 360]", "[true, 360]"),
+            ("classify = 'floating'", "classify = 'tiled'"),
+            ("classify = 'floating'", "recover-pid = 'window-owner'"),
+        ]
+        for (original, replacement) in mutations {
+            let result = parse(windowRule.replacingOccurrences(of: original, with: replacement))
+            checks.expectFalse(result.errors.isEmpty, "Accepted \(original) -> \(replacement)")
+        }
+        checks.expectFalse(parse("compatibility-rules = {}").errors.isEmpty)
+        checks.expectFalse(parse("compatibility-rules = [1]").errors.isEmpty)
+    }
+}
+
+
+@MainActor
+final class CompatibilityReloadOfflineCases {
+    let checks: CheckRunner
+    init(_ checks: CheckRunner) { self.checks = checks }
+    private let appRule = """
+    [[compatibility-rules]]
+    id = 'wrapped-launcher'
+    phase = 'application'
+    match = { app-id = 'example.launcher', bundle-path = '/Applications/Launcher.app', executable-path = '/Applications/Launcher.app/Contents/MacOS/Launcher' }
+    action = { recover-pid = 'window-owner' }
+    """
+
+    private let windowRule = """
+    [[compatibility-rules]]
+    id = 'game-main'
+    phase = 'window'
+    match = { executable-path = '/opt/game/wine', app-id-absent = true, first-exe-argument = ['Game.exe'], window-title = ['Game'], ax-role = 'AXWindow', ax-subrole = 'AXUnknown', activation-policy = 'regular', native-fullscreen = false, window-level = [0, 26], min-size = [640, 360] }
+    action = { classify = 'floating' }
+    """
+
+    private func parse(_ rules: String) -> ParseConfigResult {
+        parseConfig("config-version = 2\n" + rules)
+    }
+
+    func testRuntimeRuleChangeRequiresRestartButOrdinaryReloadIsAllowed() {
+        let current = parse(appRule)
+        checks.expectTrue(current.errors.isEmpty)
+        let changedLayout = parse("accordion-padding = 44\n" + appRule)
+        checks.expectTrue(configReloadErrors(changedLayout, currentRules: current.config.compatibilityRules, rulesLocked: true, warningsAsErrors: false).isEmpty)
+
+        for candidate in [parse(""), parse(windowRule), parse(appRule + "\n" + windowRule)] {
+            let errors = configReloadErrors(candidate, currentRules: current.config.compatibilityRules, rulesLocked: true, warningsAsErrors: false)
+            checks.expectEqual(errors.count, 1)
+            checks.expectTrue(errors[0].message.contains("requires an AeroSpace restart"))
+            checks.expectTrue(errors[0].preventConfigReload)
+        }
+        let ordered = parse(appRule + "\n" + windowRule)
+        let reordered = parse(windowRule + "\n" + appRule)
+        checks.expectFalse(configReloadErrors(reordered, currentRules: ordered.config.compatibilityRules, rulesLocked: true, warningsAsErrors: false).isEmpty)
+        checks.expectTrue(configReloadErrors(ordered, currentRules: [], rulesLocked: false, warningsAsErrors: false).isEmpty)
+    }
+
+    func testInvalidCandidateAndWarningsCannotPublishPartialConfig() {
+        let currentRules = parse(appRule).config.compatibilityRules
+        for candidate in [parse("accordion-padding = 'invalid'"), parse(windowRule.replacingOccurrences(of: "'floating'", with: "'invalid'"))] {
+            checks.expectFalse(candidate.errors.isEmpty)
+            let errors = configReloadErrors(candidate, currentRules: currentRules, rulesLocked: true, warningsAsErrors: false)
+            checks.expectEqual(errors.count, candidate.errors.count)
+            checks.expectFalse(errors.contains { $0.message.contains("requires an AeroSpace restart") })
+        }
+        let warning = parseConfig("config-version = 1")
+        checks.expectTrue(warning.errors.isEmpty)
+        checks.expectFalse(warning.warnings.isEmpty)
+        checks.expectTrue(configReloadErrors(warning, currentRules: [], rulesLocked: true, warningsAsErrors: false).isEmpty)
+        checks.expectFalse(configReloadErrors(warning, currentRules: [], rulesLocked: true, warningsAsErrors: true).isEmpty)
+    }
+}
+
+
 extension [String: Json]: AxUiElementMock {
     public func get<Attr>(_ attr: Attr) -> Attr.T? where Attr: ReadableAttr {
         guard let value = self[attr.key] else {
@@ -425,26 +645,38 @@ private func fixtureAxObject(_ value: Json) -> [String: Json]? {
 }
 
 
+MainActor.assumeIsolated {
 let checks = CheckRunner()
-let cases = CompatibilityOfflineCases(checks)
-checks.run("testNativePositivePIDBypassesRecoveryAndNoRulesRejectInvalidPID") { cases.testNativePositivePIDBypassesRecoveryAndNoRulesRejectInvalidPID() }
-checks.run("testPIDRecoveryUsesExactConfiguredIdentityAndUniqueOwner") { cases.testPIDRecoveryUsesExactConfiguredIdentityAndUniqueOwner() }
-checks.run("testRecoveryNeverBroadensMissingOrMismatchedMetadata") { cases.testRecoveryNeverBroadensMissingOrMismatchedMetadata() }
-checks.run("testFirstExecutableArgumentIsGenericExactAndCaseInsensitive") { cases.testFirstExecutableArgumentIsGenericExactAndCaseInsensitive() }
-checks.run("testProcessPrefilterReadsArgumentsOnlyOnceAndNeverForUnmatchedRules") { cases.testProcessPrefilterReadsArgumentsOnlyOnceAndNeverForUnmatchedRules() }
-checks.run("testWindowRuleCanUseExactAppIDWithoutExecutablePath") { cases.testWindowRuleCanUseExactAppIDWithoutExecutablePath() }
-checks.run("testMatchingWindowsStayFloatingAcrossFocusAndLevelChanges") { cases.testMatchingWindowsStayFloatingAcrossFocusAndLevelChanges() }
-checks.run("testFloatingActionOverridesOrdinaryNonDialogWindowAndNoMatchPreservesDefault") { cases.testFloatingActionOverridesOrdinaryNonDialogWindowAndNoMatchPreservesDefault() }
-checks.run("testWindowTraitsRejectAuxiliaryAndUnverifiedWindows") { cases.testWindowTraitsRejectAuxiliaryAndUnverifiedWindows() }
-checks.run("testRuleOrderSelectsTheFirstMatchingWindowID") { cases.testRuleOrderSelectsTheFirstMatchingWindowID() }
-checks.run("testEmptyCompatibilityRulesDoNotReadExtraAXAttributes") { cases.testEmptyCompatibilityRulesDoNotReadExtraAXAttributes() }
-checks.run("testMalformedWindowRulesFallBackToDefaultHeuristics") { cases.testMalformedWindowRulesFallBackToDefaultHeuristics() }
-checks.run("testArgumentParserStopsBeforeEnvironmentAndRejectsTruncation") { cases.testArgumentParserStopsBeforeEnvironmentAndRejectsTruncation() }
-checks.run("testFilesystemIdentityIgnoresDirectoryURLHintAndTrailingSlash") { cases.testFilesystemIdentityIgnoresDirectoryURLHintAndTrailingSlash() }
+let engineCases = CompatibilityOfflineCases(checks)
+let configCases = CompatibilityConfigOfflineCases(checks)
+let reloadCases = CompatibilityReloadOfflineCases(checks)
+checks.run("testNativePositivePIDBypassesRecoveryAndNoRulesRejectInvalidPID") { engineCases.testNativePositivePIDBypassesRecoveryAndNoRulesRejectInvalidPID() }
+checks.run("testPIDRecoveryUsesExactConfiguredIdentityAndUniqueOwner") { engineCases.testPIDRecoveryUsesExactConfiguredIdentityAndUniqueOwner() }
+checks.run("testRecoveryNeverBroadensMissingOrMismatchedMetadata") { engineCases.testRecoveryNeverBroadensMissingOrMismatchedMetadata() }
+checks.run("testFirstExecutableArgumentIsGenericExactAndCaseInsensitive") { engineCases.testFirstExecutableArgumentIsGenericExactAndCaseInsensitive() }
+checks.run("testProcessPrefilterReadsArgumentsOnlyOnceAndNeverForUnmatchedRules") { engineCases.testProcessPrefilterReadsArgumentsOnlyOnceAndNeverForUnmatchedRules() }
+checks.run("testWindowRuleCanUseExactAppIDWithoutExecutablePath") { engineCases.testWindowRuleCanUseExactAppIDWithoutExecutablePath() }
+checks.run("testMatchingWindowsStayFloatingAcrossFocusAndLevelChanges") { engineCases.testMatchingWindowsStayFloatingAcrossFocusAndLevelChanges() }
+checks.run("testFloatingActionOverridesOrdinaryNonDialogWindowAndNoMatchPreservesDefault") { engineCases.testFloatingActionOverridesOrdinaryNonDialogWindowAndNoMatchPreservesDefault() }
+checks.run("testWindowTraitsRejectAuxiliaryAndUnverifiedWindows") { engineCases.testWindowTraitsRejectAuxiliaryAndUnverifiedWindows() }
+checks.run("testRuleOrderSelectsTheFirstMatchingWindowID") { engineCases.testRuleOrderSelectsTheFirstMatchingWindowID() }
+checks.run("testEmptyCompatibilityRulesDoNotReadExtraAXAttributes") { engineCases.testEmptyCompatibilityRulesDoNotReadExtraAXAttributes() }
+checks.run("testMalformedWindowRulesFallBackToDefaultHeuristics") { engineCases.testMalformedWindowRulesFallBackToDefaultHeuristics() }
+checks.run("testArgumentParserStopsBeforeEnvironmentAndRejectsTruncation") { engineCases.testArgumentParserStopsBeforeEnvironmentAndRejectsTruncation() }
+checks.run("testFilesystemIdentityIgnoresDirectoryURLHintAndTrailingSlash") { engineCases.testFilesystemIdentityIgnoresDirectoryURLHintAndTrailingSlash() }
+checks.run("testValidRuleTypesAndExactValues") { configCases.testValidRuleTypesAndExactValues() }
+checks.run("testOptionalWindowFieldsAndEmptyRuleList") { configCases.testOptionalWindowFieldsAndEmptyRuleList() }
+checks.run("testHomePathsExpandButOtherRelativePathsAreRejected") { configCases.testHomePathsExpandButOtherRelativePathsAreRejected() }
+checks.run("testRejectsUnknownKeysAtEveryRuleTable") { configCases.testRejectsUnknownKeysAtEveryRuleTable() }
+checks.run("testApplicationIdentityAndPhaseAreStrict") { configCases.testApplicationIdentityAndPhaseAreStrict() }
+checks.run("testWindowMatchAndActionsAreStrict") { configCases.testWindowMatchAndActionsAreStrict() }
+checks.run("testRuntimeRuleChangeRequiresRestartButOrdinaryReloadIsAllowed") { reloadCases.testRuntimeRuleChangeRequiresRestartButOrdinaryReloadIsAllowed() }
+checks.run("testInvalidCandidateAndWarningsCannotPublishPartialConfig") { reloadCases.testInvalidCandidateAndWarningsCannotPublishPartialConfig() }
 let repoRoot = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 checks.run("upstream axDumps corpus") { try checkUpstreamAxDumps(repoRoot.appending(path: "axDumps"), checks) }
 print("Offline checks: \(checks.groups) groups, \(checks.assertions) assertions, \(checks.fixtures) upstream fixtures, \(checks.failures) failures")
 exit(checks.failures == 0 ? 0 : 1)
+}
 #else
 import Foundation
 print("zzz-compat-checks requires a debug build (swift run -c debug zzz-compat-checks)")

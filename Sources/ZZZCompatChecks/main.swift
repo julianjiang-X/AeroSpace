@@ -102,6 +102,46 @@ final class YaaglGameOfflineCases {
         ))
     }
 
+    func testCompatibilityFlagsDefaultOffAndAcceptOnlyBooleanMetadata() {
+        checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [:], bundleInfo: [:]), [])
+        for game in YaaglGameCompatibilityProfile.Game.allCases {
+            checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
+                environment: [:], bundleInfo: [game.bundleInfoKey: true],
+            ), [game])
+            let rejectedValues: [Any] = [false, "true", "1", 1, 0]
+            for value in rejectedValues {
+                checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
+                    environment: [:], bundleInfo: [game.bundleInfoKey: value],
+                ), [])
+            }
+        }
+    }
+
+    func testExplicitCompatibilityFlagsOverrideBundleDefaults() {
+        for game in YaaglGameCompatibilityProfile.Game.allCases {
+            checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
+                environment: [game.environmentKey: "1"], bundleInfo: [game.bundleInfoKey: false],
+            ), [game])
+            for value in ["0", "", "true", "invalid"] {
+                checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
+                    environment: [game.environmentKey: value], bundleInfo: [game.bundleInfoKey: true],
+                ), [])
+            }
+        }
+    }
+
+    func testCompatibilityFlagsRemainIndependentForEveryLaunchMethod() {
+        let allGames = YaaglGameCompatibilityProfile.Game.allCases
+        let metadata = Dictionary(uniqueKeysWithValues: allGames.map { ($0.bundleInfoKey, true as Any) })
+        checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [:], bundleInfo: metadata), allGames)
+        checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [
+            "AEROSPACE_YAAGL_ZZZ_COMPAT": "0", "AEROSPACE_YAAGL_GI_COMPAT": "0",
+        ], bundleInfo: metadata), [.hsr])
+        checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [
+            "AEROSPACE_YAAGL_GI_COMPAT": "1",
+        ], bundleInfo: [:]), [.gi])
+    }
+
     func testOptInAndWinePathAreRequiredBeforeReadingArguments() {
         var reads = 0
         let arguments: () -> [String]? = { reads += 1; return [self.gameArgument] }
@@ -466,6 +506,9 @@ private func fixtureAxObject(_ value: Json) -> [String: Json]? {
 
 let checks = CheckRunner()
 let cases = YaaglGameOfflineCases(checks)
+checks.run("testCompatibilityFlagsDefaultOffAndAcceptOnlyBooleanMetadata") { cases.testCompatibilityFlagsDefaultOffAndAcceptOnlyBooleanMetadata() }
+checks.run("testExplicitCompatibilityFlagsOverrideBundleDefaults") { cases.testExplicitCompatibilityFlagsOverrideBundleDefaults() }
+checks.run("testCompatibilityFlagsRemainIndependentForEveryLaunchMethod") { cases.testCompatibilityFlagsRemainIndependentForEveryLaunchMethod() }
 checks.run("testOptInAndWinePathAreRequiredBeforeReadingArguments") { cases.testOptInAndWinePathAreRequiredBeforeReadingArguments() }
 checks.run("testFirstWindowsExecutableMustBeZZZ") { cases.testFirstWindowsExecutableMustBeZZZ() }
 checks.run("testObservedMainWindowStaysFloatingWhenUnfocusedAndLevelChanges") { try cases.testObservedMainWindowStaysFloatingWhenUnfocusedAndLevelChanges() }

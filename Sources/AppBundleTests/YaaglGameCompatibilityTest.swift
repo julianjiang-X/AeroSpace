@@ -26,6 +26,46 @@ final class YaaglGameCompatibilityTest: XCTestCase {
         ))
     }
 
+    func testCompatibilityFlagsDefaultOffAndAcceptOnlyBooleanMetadata() {
+        XCTAssertEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [:], bundleInfo: [:]), [])
+        for game in YaaglGameCompatibilityProfile.Game.allCases {
+            XCTAssertEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
+                environment: [:], bundleInfo: [game.bundleInfoKey: true],
+            ), [game])
+            let rejectedValues: [Any] = [false, "true", "1", 1, 0]
+            for value in rejectedValues {
+                XCTAssertEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
+                    environment: [:], bundleInfo: [game.bundleInfoKey: value],
+                ), [])
+            }
+        }
+    }
+
+    func testExplicitCompatibilityFlagsOverrideBundleDefaults() {
+        for game in YaaglGameCompatibilityProfile.Game.allCases {
+            XCTAssertEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
+                environment: [game.environmentKey: "1"], bundleInfo: [game.bundleInfoKey: false],
+            ), [game])
+            for value in ["0", "", "true", "invalid"] {
+                XCTAssertEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
+                    environment: [game.environmentKey: value], bundleInfo: [game.bundleInfoKey: true],
+                ), [])
+            }
+        }
+    }
+
+    func testCompatibilityFlagsRemainIndependentForEveryLaunchMethod() {
+        let allGames = YaaglGameCompatibilityProfile.Game.allCases
+        let metadata = Dictionary(uniqueKeysWithValues: allGames.map { ($0.bundleInfoKey, true as Any) })
+        XCTAssertEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [:], bundleInfo: metadata), allGames)
+        XCTAssertEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [
+            "AEROSPACE_YAAGL_ZZZ_COMPAT": "0", "AEROSPACE_YAAGL_GI_COMPAT": "0",
+        ], bundleInfo: metadata), [.hsr])
+        XCTAssertEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [
+            "AEROSPACE_YAAGL_GI_COMPAT": "1",
+        ], bundleInfo: [:]), [.gi])
+    }
+
     func testOptInAndWinePathAreRequiredBeforeReadingArguments() {
         var reads = 0
         let arguments: () -> [String]? = { reads += 1; return [self.gameArgument] }

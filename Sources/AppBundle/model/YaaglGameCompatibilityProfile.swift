@@ -1,4 +1,5 @@
 import AppKit
+import CoreFoundation
 import Darwin
 import Foundation
 
@@ -15,6 +16,13 @@ struct YaaglGameCompatibilityProfile: Sendable {
                 case .zzz: "AEROSPACE_YAAGL_ZZZ_COMPAT"
                 case .hsr: "AEROSPACE_YAAGL_HSR_COMPAT"
                 case .gi: "AEROSPACE_YAAGL_GI_COMPAT"
+            }
+        }
+        var bundleInfoKey: String {
+            switch self {
+                case .zzz: "AeroSpaceYaaglZZZCompatibility"
+                case .hsr: "AeroSpaceYaaglHSRCompatibility"
+                case .gi: "AeroSpaceYaaglGICompatibility"
             }
         }
         var wineDirectory: String {
@@ -42,7 +50,23 @@ struct YaaglGameCompatibilityProfile: Sendable {
         }
     }
 
-    static let enabledGames = Game.allCases.filter { ProcessInfo.processInfo.environment[$0.environmentKey] == "1" }
+    static let enabledGames = resolveEnabledGames(
+        environment: ProcessInfo.processInfo.environment,
+        bundleInfo: Bundle.main.infoDictionary ?? [:],
+    )
+
+    /// Explicit environment values override packaged Boolean defaults. Invalid
+    /// overrides fail closed; an ordinary build with no metadata remains off.
+    static func resolveEnabledGames(environment: [String: String], bundleInfo: [String: Any]) -> [Game] {
+        Game.allCases.filter { game in
+            if let override = environment[game.environmentKey] { return override == "1" }
+            guard let value = bundleInfo[game.bundleInfoKey] as? NSNumber,
+                  CFGetTypeID(value) == CFBooleanGetTypeID()
+            else { return false }
+            return value.boolValue
+        }
+    }
+
     let game: Game
     var identifier: String { "yaagl-\(game.rawValue)-main-v1" }
 

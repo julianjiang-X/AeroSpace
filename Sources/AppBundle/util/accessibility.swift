@@ -13,7 +13,8 @@ func waitForAccessibilityPermission_nonCancellable() async {
             TrayMenuModel.shared.axPermissionStatus = .granted
             break
         }
-        if TrayMenuModel.shared.axPermissionStatus == .waitingWithPrompt {
+        if TrayMenuModel.shared.axPermissionStatus == .waitingWithPrompt,
+           Bundle.main.object(forInfoDictionaryKey: "AeroSpacePreserveAccessibilityGrant") as? Bool != true {
             resetAccessibility() // Because macOS doesn't reset it for us when the app signature changes...
         }
         TrayMenuModel.shared.axPermissionStatus = .waiting

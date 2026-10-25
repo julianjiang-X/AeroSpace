@@ -1,5 +1,5 @@
-// Generated from the Yaagl game/launcher compatibility tests and upstream AX fixture adapter.
-// Regenerate with ../../zzz-compat-test/generate-offline-checks.py after changing tests.
+// Generated from compatibility tests and the upstream AX fixture adapter.
+// Regenerate with ../../compatibility-rules/generate-offline-checks.py after changing tests.
 // This is a focused offline runner, not the complete XCTest suite.
 #if DEBUG
 import AppKit
@@ -77,446 +77,290 @@ func checkUpstreamAxDumps(_ dir: URL, _ checks: CheckRunner) throws {
 }
 
 
-final class YaaglGameOfflineCases {
+final class CompatibilityOfflineCases {
     let checks: CheckRunner
     init(_ checks: CheckRunner) { self.checks = checks }
-    private let wineURL = URL(filePath: "/fixture/Yaagl ZZZ OS/wine/lib/wine/x86_64-unix/wine")
-    private let gameArgument = "Z:\\Users\\fixture\\Games\\ZZZ\\ZenlessZoneZero.exe"
-    private let hsrWineURL = URL(filePath: "/fixture/Yaagl HSR/wine/lib/wine/x86_64-unix/wine")
-    private let hsrGameArgument = "Z:\\Users\\fixture\\Games\\HSR\\StarRail.exe"
-    private let giWineURL = URL(filePath: "/fixture/Yaagl/wine/lib/wine/x86_64-unix/wine")
-    private let giGameArgument = "Z:\\Users\\fixture\\Games\\GI\\YuanShen.exe"
+    private let wrapperIdentity = CompatibilityProcessIdentity(
+        appId: "org.fixture.wrapper", bundlePath: "/fixture/Wrapper.app",
+        executablePath: "/fixture/Wrapper.app/Contents/MacOS/Wrapper",
+    )
+    private let clientIdentity = CompatibilityProcessIdentity(
+        appId: nil, bundlePath: nil, executablePath: "/fixture/runtime/bin/loader",
+    )
 
-    private func profile(game: YaaglGameCompatibilityProfile.Game = .zzz) throws -> YaaglGameCompatibilityProfile {
-        let (wineURL, argument) = switch game {
-            case .zzz: (self.wineURL, gameArgument)
-            case .hsr: (hsrWineURL, hsrGameArgument)
-            case .gi: (giWineURL, giGameArgument)
-        }
-        return try checks.require(YaaglGameCompatibilityProfile.detect(
-            game: game,
-            enabled: true,
-            executableURL: wineURL,
-            expectedWineExecutableURL: wineURL,
-            arguments: { [argument, "-example-game-option"] },
-        ))
+    private func applicationRule(_ id: String = "fixture-pid") -> CompatibilityRule {
+        .init(id: id, phase: .application, match: .init(
+            appId: wrapperIdentity.appId, bundlePath: wrapperIdentity.bundlePath,
+            executablePath: wrapperIdentity.executablePath,
+        ), action: .init(recoverPid: .windowOwner))
     }
 
-    func testCompatibilityFlagsDefaultOffAndAcceptOnlyBooleanMetadata() {
-        checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [:], bundleInfo: [:]), [])
-        for game in YaaglGameCompatibilityProfile.Game.allCases {
-            checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
-                environment: [:], bundleInfo: [game.bundleInfoKey: true],
-            ), [game])
-            let rejectedValues: [Any] = [false, "true", "1", 1, 0]
-            for value in rejectedValues {
-                checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
-                    environment: [:], bundleInfo: [game.bundleInfoKey: value],
-                ), [])
-            }
-        }
+    private func windowRule(_ id: String = "fixture-floating", match: CompatibilityRule.Match? = nil) -> CompatibilityRule {
+        .init(id: id, phase: .window, match: match ?? .init(
+            executablePath: clientIdentity.executablePath, appIdAbsent: true,
+            firstExeArgument: ["Client.exe", "Client-CN.exe"], windowTitle: ["Example client", "示例客户端"],
+            axRole: kAXWindowRole, axSubrole: kAXUnknownSubrole, activationPolicy: .regular,
+            nativeFullscreen: false, windowLevel: [0, 26], minSize: [640, 360],
+        ), action: .init(classify: .floating))
     }
 
-    func testExplicitCompatibilityFlagsOverrideBundleDefaults() {
-        for game in YaaglGameCompatibilityProfile.Game.allCases {
-            checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
-                environment: [game.environmentKey: "1"], bundleInfo: [game.bundleInfoKey: false],
-            ), [game])
-            for value in ["0", "", "true", "invalid"] {
-                checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(
-                    environment: [game.environmentKey: value], bundleInfo: [game.bundleInfoKey: true],
-                ), [])
-            }
-        }
+    private func windowRules(_ rules: [CompatibilityRule]? = nil, arguments: [String]? = ["Z:\\Client\\Client.exe"]) -> CompatibilityWindowRules {
+        CompatibilityRuleEngine.windowRules(rules: rules ?? [windowRule()], identity: clientIdentity, arguments: { arguments })
     }
 
-    func testCompatibilityFlagsRemainIndependentForEveryLaunchMethod() {
-        let allGames = YaaglGameCompatibilityProfile.Game.allCases
-        let metadata = Dictionary(uniqueKeysWithValues: allGames.map { ($0.bundleInfoKey, true as Any) })
-        checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [:], bundleInfo: metadata), allGames)
-        checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [
-            "AEROSPACE_YAAGL_ZZZ_COMPAT": "0", "AEROSPACE_YAAGL_GI_COMPAT": "0",
-        ], bundleInfo: metadata), [.hsr])
-        checks.expectEqual(YaaglGameCompatibilityProfile.resolveEnabledGames(environment: [
-            "AEROSPACE_YAAGL_GI_COMPAT": "1",
-        ], bundleInfo: [:]), [.gi])
-    }
-
-    func testOptInAndWinePathAreRequiredBeforeReadingArguments() {
+    func testNativePositivePIDBypassesRecoveryAndNoRulesRejectInvalidPID() {
         var reads = 0
-        let arguments: () -> [String]? = { reads += 1; return [self.gameArgument] }
-        checks.expectNil(YaaglGameCompatibilityProfile.detect(
-            enabled: false, executableURL: wineURL,
-            expectedWineExecutableURL: wineURL, arguments: arguments,
-        ))
-        checks.expectNil(YaaglGameCompatibilityProfile.detect(
-            enabled: true, executableURL: URL(filePath: "/fixture/Yaagl HSR/wine/lib/wine/x86_64-unix/wine"),
-            expectedWineExecutableURL: wineURL, arguments: arguments,
-        ))
-        checks.expectNil(YaaglGameCompatibilityProfile.detect(
-            enabled: true, executableURL: nil,
-            expectedWineExecutableURL: wineURL, arguments: arguments,
+        let result = CompatibilityRuleEngine.resolveProcess(
+            rules: [], reportedPID: 42, identity: wrapperIdentity,
+            ownerPIDs: { reads += 1; return [] }, processPath: { _ in reads += 1; return nil },
+        )
+        checks.expectEqual(result?.pid, 42)
+        checks.expectNil(result?.recoveryRule)
+        let invalidPIDs: [Int32] = [-1, 0]
+        for pid in invalidPIDs {
+            checks.expectNil(CompatibilityRuleEngine.resolveProcess(
+                rules: [], reportedPID: pid, identity: wrapperIdentity,
+                ownerPIDs: { reads += 1; return [101] }, processPath: { _ in reads += 1; return self.wrapperIdentity.executablePath },
+            ))
+        }
+        checks.expectEqual(reads, 0)
+    }
+
+    func testPIDRecoveryUsesExactConfiguredIdentityAndUniqueOwner() {
+        let rule = applicationRule()
+        let result = CompatibilityRuleEngine.resolveProcess(
+            rules: [rule], reportedPID: -1, identity: wrapperIdentity,
+            ownerPIDs: { [-1, 0, 101, 101, 202] },
+            processPath: { $0 == 101 ? self.wrapperIdentity.executablePath : "/fixture/Other.app/Contents/MacOS/Other" },
+        )
+        checks.expectEqual(result?.pid, 101)
+        checks.expectEqual(result?.recoveryRule?.id, rule.id)
+        let cases: [([Int32], [Int32: String])] = [
+            ([], [:]), ([-1, 0], [:]), ([101], [:]),
+            ([101], [101: "/fixture/Other.app/Contents/MacOS/Other"]),
+            ([101], [101: wrapperIdentity.executablePath! + "Helper"]),
+            ([101, 202], [101: wrapperIdentity.executablePath!, 202: wrapperIdentity.executablePath!]),
+        ]
+        for (owners, paths) in cases {
+            checks.expectNil(CompatibilityRuleEngine.resolveProcess(
+                rules: [rule], reportedPID: -1, identity: wrapperIdentity,
+                ownerPIDs: { owners }, processPath: { paths[$0] },
+            ))
+        }
+    }
+
+    func testRecoveryNeverBroadensMissingOrMismatchedMetadata() {
+        var reads = 0
+        let identities = [
+            CompatibilityProcessIdentity(appId: nil, bundlePath: wrapperIdentity.bundlePath, executablePath: wrapperIdentity.executablePath),
+            CompatibilityProcessIdentity(appId: "org.fixture.other", bundlePath: wrapperIdentity.bundlePath, executablePath: wrapperIdentity.executablePath),
+            CompatibilityProcessIdentity(appId: wrapperIdentity.appId, bundlePath: "/tmp/Wrapper.app", executablePath: wrapperIdentity.executablePath),
+            CompatibilityProcessIdentity(appId: wrapperIdentity.appId, bundlePath: wrapperIdentity.bundlePath, executablePath: "/bin/bash"),
+        ]
+        for identity in identities {
+            checks.expectNil(CompatibilityRuleEngine.resolveProcess(
+                rules: [applicationRule()], reportedPID: -1, identity: identity,
+                ownerPIDs: { reads += 1; return [101] }, processPath: { _ in reads += 1; return self.wrapperIdentity.executablePath },
+            ))
+        }
+        var incomplete = applicationRule().match
+        incomplete.bundlePath = nil
+        let malformed = CompatibilityRule(id: "incomplete", phase: .application, match: incomplete, action: .init(recoverPid: .windowOwner))
+        checks.expectNil(CompatibilityRuleEngine.resolveProcess(
+            rules: [malformed, windowRule()], reportedPID: -1, identity: wrapperIdentity,
+            ownerPIDs: { reads += 1; return [101] }, processPath: { _ in reads += 1; return self.wrapperIdentity.executablePath },
         ))
         checks.expectEqual(reads, 0)
     }
 
-    func testFirstWindowsExecutableMustBeZZZ() {
+    func testFirstExecutableArgumentIsGenericExactAndCaseInsensitive() {
+        for arguments in [["loader", "Z:\\Client\\Client.exe"], ["/fixture/Client-CN.EXE"]] {
+            checks.expectEqual(windowRules(arguments: arguments).rules.map(\.id), ["fixture-floating"])
+        }
         let rejectedArguments: [[String]?] = [
-            ["wine", "wineserver.exe", gameArgument],
-            ["wine", "StarRail.exe", gameArgument],
-            ["wine", "ZenlessZoneZero.exe.helper"],
-            ["wine", "OtherZenlessZoneZero.exe"],
-            ["wine"],
-            nil,
+            ["CrashReporter.exe", "Client.exe"], ["OtherClient.exe"], ["Client.exe.helper"], ["Client.exe Launcher.exe"], [], nil,
         ]
         for arguments in rejectedArguments {
-            checks.expectNil(YaaglGameCompatibilityProfile.detect(
-                enabled: true, executableURL: wineURL,
-                expectedWineExecutableURL: wineURL, arguments: { arguments },
-            ))
+            checks.expectEqual(windowRules(arguments: arguments).rules.count, 0)
         }
-        checks.expectNotNil(YaaglGameCompatibilityProfile.detect(
-            enabled: true, executableURL: wineURL,
-            expectedWineExecutableURL: wineURL, arguments: { ["wine", self.gameArgument] },
-        ))
     }
 
-    func testObservedMainWindowStaysFloatingWhenUnfocusedAndLevelChanges() throws {
-        let profile = try profile()
-        for focused in [true, false] {
-            let window = fixtureWindow(focused: focused)
-            for level in [MacOsWindowLevel.unknown(windowLevel: 26), .normalWindow] {
-                checks.expectTrue(window.isWindowHeuristic(
-                    axApp: FixtureAxElement(fields: [:]), nil, .regular, level,
-                    yaaglGameCompatibility: profile,
-                ))
-                checks.expectEqual(window.getWindowType(
-                    axApp: FixtureAxElement(fields: [:]), nil, .regular, level,
-                    yaaglGameCompatibility: profile,
-                ), .dialog)
+    func testProcessPrefilterReadsArgumentsOnlyOnceAndNeverForUnmatchedRules() {
+        var reads = 0
+        let loaded = CompatibilityRuleEngine.windowRules(
+            rules: [windowRule("one"), windowRule("two")], identity: clientIdentity,
+            arguments: { reads += 1; return ["Client.exe"] },
+        )
+        checks.expectEqual(loaded.rules.map(\.id), ["one", "two"])
+        checks.expectEqual(reads, 1)
+        _ = CompatibilityRuleEngine.windowRules(
+            rules: [windowRule()], identity: wrapperIdentity,
+            arguments: { reads += 1; return ["Client.exe"] },
+        )
+        checks.expectEqual(reads, 1)
+        var match = windowRule().match
+        match.firstExeArgument = nil
+        checks.expectEqual(CompatibilityRuleEngine.windowRules(
+            rules: [windowRule(match: match)], identity: clientIdentity,
+            arguments: { reads += 1; return nil },
+        ).rules.count, 1)
+        checks.expectEqual(reads, 1)
+    }
+
+    func testWindowRuleCanUseExactAppIDWithoutExecutablePath() {
+        var match = windowRule().match
+        match.executablePath = nil
+        match.appIdAbsent = false
+        match.appId = wrapperIdentity.appId
+        match.firstExeArgument = nil
+        let rules = CompatibilityRuleEngine.windowRules(rules: [windowRule(match: match)], identity: wrapperIdentity, arguments: { nil })
+        checks.expectEqual(rules.rules.count, 1)
+        checks.expectEqual(CompatibilityRuleEngine.windowRules(rules: [windowRule(match: match)], identity: clientIdentity, arguments: { nil }).rules.count, 0)
+        match.appId = nil // No exact process identity: reject even if the window traits match.
+        checks.expectEqual(CompatibilityRuleEngine.windowRules(rules: [windowRule(match: match)], identity: wrapperIdentity, arguments: { nil }).rules.count, 0)
+    }
+
+    func testMatchingWindowsStayFloatingAcrossFocusAndLevelChanges() {
+        for title in ["Example client", "示例客户端"] {
+            for focused in [false, true] {
+                let window = fixtureWindow(title: title, focused: focused)
+                for level in [MacOsWindowLevel.normalWindow, .unknown(windowLevel: 26)] {
+                    checks.expectTrue(window.isWindowHeuristic(
+                        axApp: FixtureAxElement(fields: [:]), nil, .regular, level, compatibilityRules: windowRules(),
+                    ))
+                    checks.expectEqual(window.getWindowType(
+                        axApp: FixtureAxElement(fields: [:]), nil, .regular, level, compatibilityRules: windowRules(),
+                    ), .dialog)
+                    checks.expectEqual(window.matchedCompatibilityRule(windowRules(), .regular, level)?.id, "fixture-floating")
+                }
             }
         }
     }
 
-    func testDefaultClassificationRemainsPopupWithoutVerifiedProcess() {
-        let window = fixtureWindow(focused: true)
-        checks.expectEqual(window.getWindowType(
-            axApp: FixtureAxElement(fields: [:]), nil, .regular, .unknown(windowLevel: 26),
+    func testFloatingActionOverridesOrdinaryNonDialogWindowAndNoMatchPreservesDefault() {
+        var match = windowRule().match
+        match.axSubrole = kAXStandardWindowSubrole
+        let rules = windowRules([windowRule(match: match)])
+        let ordinary = fixtureWindow(subrole: kAXStandardWindowSubrole, fullscreenButtonEnabled: true)
+        checks.expectEqual(ordinary.getWindowType(axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow), .window)
+        checks.expectEqual(ordinary.getWindowType(axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow, compatibilityRules: rules), .dialog)
+        checks.expectEqual(fixtureWindow().getWindowType(axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow), .popup)
+        checks.expectEqual(fixtureWindow(title: "Other window").getWindowType(
+            axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow, compatibilityRules: windowRules(),
         ), .popup)
     }
 
-    func testUnrelatedAXUnknownWindowsAreNotAdmitted() throws {
-        let profile = try profile()
+    func testWindowTraitsRejectAuxiliaryAndUnverifiedWindows() {
         let cases: [(FixtureAxElement, NSApplication.ActivationPolicy, MacOsWindowLevel?)] = [
-            (fixtureWindow(title: "Wine dialog"), .regular, .normalWindow),
-            (fixtureWindow(size: CGSize(width: 320, height: 200)), .regular, .normalWindow),
+            (fixtureWindow(title: ""), .regular, .normalWindow),
+            (fixtureWindow(title: "Example Client"), .regular, .normalWindow),
+            (fixtureWindow(title: "Example client Launcher"), .regular, .normalWindow),
+            (fixtureWindow(size: CGSize(width: 1920, height: 30)), .regular, .normalWindow),
+            (fixtureWindow(size: CGSize(width: 64, height: 64)), .regular, .normalWindow),
             (fixtureWindow(size: CGSize(width: CGFloat.infinity, height: 1080)), .regular, .normalWindow),
-            (fixtureWindow(nativeFullscreen: true), .regular, .normalWindow),
+            (fixtureWindow(size: CGSize(width: CGFloat.nan, height: 1080)), .regular, .normalWindow),
+            (fixtureWindow(fullscreen: true), .regular, .normalWindow),
+            (fixtureWindow(fullscreen: nil), .regular, .normalWindow),
+            (fixtureWindow(role: kAXButtonRole), .regular, .normalWindow),
+            (fixtureWindow(subrole: kAXDialogSubrole), .regular, .normalWindow),
             (fixtureWindow(), .accessory, .normalWindow),
             (fixtureWindow(), .regular, .alwaysOnTopWindow),
             (fixtureWindow(), .regular, nil),
         ]
         for (window, policy, level) in cases {
-            checks.expectEqual(window.getWindowType(
-                axApp: FixtureAxElement(fields: [:]), nil, policy, level,
-                yaaglGameCompatibility: profile,
-            ), .popup)
-        }
-        checks.expectEqual(fixtureWindow().getWindowType(
-            axApp: FixtureAxElement(fields: [:]), .chrome, .regular, .unknown(windowLevel: 26),
-            yaaglGameCompatibility: profile,
-        ), .popup)
-    }
-
-    func testProcessArgumentsParserStopsBeforeEnvironment() {
-        let arguments = [gameArgument, "-example-game-option"]
-        checks.expectEqual(YaaglGameCompatibilityProfile.parseProcessArguments(processArgumentsFixture(arguments)), arguments)
-        checks.expectNil(YaaglGameCompatibilityProfile.parseProcessArguments(Data()))
-        checks.expectNil(YaaglGameCompatibilityProfile.parseProcessArguments(Data([1, 0, 0])))
-        checks.expectNil(YaaglGameCompatibilityProfile.parseProcessArguments(processArgumentsFixture(arguments).prefix(8)))
-        checks.expectNil(YaaglGameCompatibilityProfile.detect(
-            enabled: true, executableURL: wineURL,
-            expectedWineExecutableURL: wineURL,
-            arguments: { YaaglGameCompatibilityProfile.parseProcessArguments(self.processArgumentsFixture(["wine"])) },
-        ))
-    }
-
-    func testHSRMainWindowStaysFloatingWhenUnfocusedAndLevelChanges() throws {
-        let profile = try profile(game: .hsr)
-        checks.expectEqual(profile.identifier, "yaagl-hsr-main-v1")
-        for title in ["Honkai: Star Rail", "崩坏：星穹铁道"] {
-            for focused in [true, false] {
-                let window = fixtureWindow(title: title, focused: focused)
-                for level in [MacOsWindowLevel.unknown(windowLevel: 26), .normalWindow] {
-                    checks.expectTrue(window.isWindowHeuristic(
-                        axApp: FixtureAxElement(fields: [:]), nil, .regular, level,
-                        yaaglGameCompatibility: profile,
-                    ))
-                    checks.expectEqual(window.getWindowType(
-                        axApp: FixtureAxElement(fields: [:]), nil, .regular, level,
-                        yaaglGameCompatibility: profile,
-                    ), .dialog)
-                }
-            }
+            checks.expectNil(window.matchedCompatibilityRule(windowRules(), policy, level))
         }
     }
 
-    func testHSRRejectsThinAndUnnamedAuxiliaryWindows() throws {
-        let profile = try profile(game: .hsr)
-        for window in [
-            fixtureWindow(title: "", size: CGSize(width: 1920, height: 30)),
-            fixtureWindow(title: "", size: CGSize(width: 64, height: 64)),
-            fixtureWindow(title: "", size: CGSize(width: 1920, height: 1080)),
-            fixtureWindow(title: "Honkai: Star Rail", size: CGSize(width: 1920, height: 30)),
-            fixtureWindow(title: "Honkai: Star Rail", size: CGSize(width: 64, height: 64)),
-            fixtureWindow(title: "Honkai: Star Rail", nativeFullscreen: true),
-            fixtureWindow(title: "崩坏:星穹铁道"),
-            fixtureWindow(title: "崩坏：星穹铁道 Launcher"),
-            fixtureWindow(title: "崩坏：星穹铁道", size: CGSize(width: 64, height: 64)),
-        ] {
-            checks.expectEqual(window.getWindowType(
-                axApp: FixtureAxElement(fields: [:]), nil, .regular, .unknown(windowLevel: 26),
-                yaaglGameCompatibility: profile,
-            ), .popup)
-        }
-        checks.expectEqual(fixtureWindow(title: "Honkai: Star Rail").getWindowType(
-            axApp: FixtureAxElement(fields: [:]), nil, .regular, .unknown(windowLevel: 26),
-        ), .popup)
+    func testRuleOrderSelectsTheFirstMatchingWindowID() {
+        var unmatched = windowRule().match
+        unmatched.windowTitle = ["Different window"]
+        let rules = windowRules([windowRule("unmatched", match: unmatched), windowRule("first"), windowRule("second")])
+        checks.expectEqual(fixtureWindow().matchedCompatibilityRule(rules, .regular, .normalWindow)?.id, "first")
     }
 
-    func testGameProfilesCannotCrossMatch() throws {
-        let zzz = try profile()
-        let hsr = try profile(game: .hsr)
-        checks.expectEqual(zzz.identifier, "yaagl-zzz-main-v1")
-        checks.expectEqual(fixtureWindow(title: "Honkai: Star Rail").getWindowType(
-            axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow,
-            yaaglGameCompatibility: zzz,
-        ), .popup)
-        checks.expectEqual(fixtureWindow(title: "崩坏：星穹铁道").getWindowType(
-            axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow,
-            yaaglGameCompatibility: zzz,
-        ), .popup)
-        checks.expectEqual(fixtureWindow().getWindowType(
-            axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow,
-            yaaglGameCompatibility: hsr,
-        ), .popup)
-        for (game, wine, wrongArgument) in [
-            (YaaglGameCompatibilityProfile.Game.hsr, hsrWineURL, gameArgument),
-            (.zzz, wineURL, hsrGameArgument),
-        ] {
-            checks.expectNil(YaaglGameCompatibilityProfile.detect(
-                game: game, enabled: true, executableURL: wine,
-                expectedWineExecutableURL: wine, arguments: { [wrongArgument] },
-            ))
-        }
-        checks.expectNil(YaaglGameCompatibilityProfile.detect(
-            game: .hsr, enabled: false, executableURL: hsrWineURL,
-            expectedWineExecutableURL: hsrWineURL, arguments: { [self.hsrGameArgument] },
-        ))
-        checks.expectNil(YaaglGameCompatibilityProfile.detect(
-            game: .hsr, enabled: true, executableURL: wineURL,
-            expectedWineExecutableURL: hsrWineURL, arguments: { [self.hsrGameArgument] },
-        ))
-        checks.expectNil(YaaglGameCompatibilityProfile.detect(
-            game: .hsr, enabled: true, executableURL: hsrWineURL,
-            expectedWineExecutableURL: hsrWineURL, arguments: { ["UnityCrashHandler64.exe", self.hsrGameArgument] },
-        ))
+    func testEmptyCompatibilityRulesDoNotReadExtraAXAttributes() {
+        let window = CountingAxElement()
+        checks.expectNil(window.matchedCompatibilityRule(.empty, .regular, .normalWindow))
+        checks.expectEqual(window.reads, 0)
     }
 
-    func testGIAcceptsOnlyKnownClientExecutables() {
-        for executable in ["YuanShen.exe", "GenshinImpact.exe"] {
-            checks.expectNotNil(YaaglGameCompatibilityProfile.detect(
-                game: .gi, enabled: true, executableURL: giWineURL,
-                expectedWineExecutableURL: giWineURL,
-                arguments: { ["wine", "Z:\\Games\\GI\\\(executable)"] },
-            ))
-        }
-        for arguments in [
-            ["UnityCrashHandler64.exe", giGameArgument],
-            ["StarRail.exe"], [gameArgument], ["OtherGenshinImpact.exe"],
-            ["GenshinImpact.exe.helper"], ["YuanShen.exe Launcher.exe"],
-        ] {
-            checks.expectNil(YaaglGameCompatibilityProfile.detect(
-                game: .gi, enabled: true, executableURL: giWineURL,
-                expectedWineExecutableURL: giWineURL, arguments: { arguments },
-            ))
-        }
-        checks.expectNil(YaaglGameCompatibilityProfile.detect(
-            game: .gi, enabled: false, executableURL: giWineURL,
-            expectedWineExecutableURL: giWineURL, arguments: { [self.giGameArgument] },
-        ))
-        checks.expectNil(YaaglGameCompatibilityProfile.detect(
-            game: .gi, enabled: true, executableURL: hsrWineURL,
-            expectedWineExecutableURL: giWineURL, arguments: { [self.giGameArgument] },
-        ))
-        for game in [YaaglGameCompatibilityProfile.Game.zzz, .hsr] {
-            checks.expectNil(YaaglGameCompatibilityProfile.detect(
-                game: game, enabled: true, executableURL: giWineURL,
-                expectedWineExecutableURL: giWineURL, arguments: { [self.giGameArgument] },
-            ))
-        }
-    }
-
-    func testGIKnownMainWindowTitlesStayFloatingWithoutFocus() throws {
-        let profile = try profile(game: .gi)
-        checks.expectEqual(profile.identifier, "yaagl-gi-main-v1")
-        for title in ["原神", "Genshin Impact"] {
-            for focused in [true, false] {
-                let window = fixtureWindow(title: title, focused: focused)
-                for level in [MacOsWindowLevel.unknown(windowLevel: 26), .normalWindow] {
-                    checks.expectTrue(window.isWindowHeuristic(
-                        axApp: FixtureAxElement(fields: [:]), nil, .regular, level,
-                        yaaglGameCompatibility: profile,
-                    ))
-                    checks.expectEqual(window.getWindowType(
-                        axApp: FixtureAxElement(fields: [:]), nil, .regular, level,
-                        yaaglGameCompatibility: profile,
-                    ), .dialog)
-                }
-            }
-        }
-    }
-
-    func testGIRejectsUnverifiedAndAuxiliaryWindows() throws {
-        let profile = try profile(game: .gi)
-        for window in [
-            fixtureWindow(title: ""),
-            fixtureWindow(title: "原神 Launcher"),
-            fixtureWindow(title: "Genshin Impact Launcher"),
-            fixtureWindow(title: "genshin impact"),
-            fixtureWindow(title: "Honkai: Star Rail"),
-            fixtureWindow(title: "ZenlessZoneZero"),
-            fixtureWindow(title: "原神", size: CGSize(width: 1920, height: 30)),
-            fixtureWindow(title: "Genshin Impact", size: CGSize(width: 64, height: 64)),
-            fixtureWindow(title: "原神", nativeFullscreen: true),
-        ] {
-            checks.expectEqual(window.getWindowType(
+    func testMalformedWindowRulesFallBackToDefaultHeuristics() {
+        var missingRole = windowRule().match; missingRole.axRole = nil
+        var emptyRole = windowRule().match; emptyRole.axRole = ""
+        var emptySubrole = windowRule().match; emptySubrole.axSubrole = " "
+        var missingTitles = windowRule().match; missingTitles.windowTitle = nil
+        var emptyTitles = windowRule().match; emptyTitles.windowTitle = []
+        var blankTitle = windowRule().match; blankTitle.windowTitle = ["Example client", ""]
+        var noIdentity = windowRule().match; noIdentity.executablePath = nil
+        for match in [missingRole, emptyRole, emptySubrole, missingTitles, emptyTitles, blankTitle, noIdentity] {
+            let rule = windowRule(match: match)
+            checks.expectEqual(rule.isValidFloatingWindowRule, false)
+            checks.expectEqual(windowRules([rule]).rules.count, 0)
+            checks.expectEqual(fixtureWindow().getWindowType(
                 axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow,
-                yaaglGameCompatibility: profile,
+                compatibilityRules: .init(rules: [rule]),
             ), .popup)
-        }
-        for title in ["原神", "Genshin Impact"] {
-            checks.expectEqual(fixtureWindow(title: title).getWindowType(
-                axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow,
-            ), .popup)
-            for otherGame in [YaaglGameCompatibilityProfile.Game.zzz, .hsr] {
-                checks.expectEqual(fixtureWindow(title: title).getWindowType(
-                    axApp: FixtureAxElement(fields: [:]), nil, .regular, .normalWindow,
-                    yaaglGameCompatibility: try self.profile(game: otherGame),
-                ), .popup)
-            }
         }
     }
 
-    private func processArgumentsFixture(_ arguments: [String]) -> Data {
+    func testArgumentParserStopsBeforeEnvironmentAndRejectsTruncation() {
+        let arguments = ["Z:\\Client\\Client.exe", "-example-option"]
         var argc = Int32(arguments.count)
-        var result = unsafe withUnsafeBytes(of: &argc) { unsafe Data($0) }
-        result.append(contentsOf: Array("/fixture/wine".utf8) + [0, 0, 0])
-        for argument in arguments { result.append(contentsOf: Array(argument.utf8) + [0]) }
-        result.append(contentsOf: Array("DO_NOT_PARSE=ZenlessZoneZero.exe".utf8) + [0, 0])
-        return result
+        var data = unsafe withUnsafeBytes(of: &argc) { unsafe Data($0) }
+        data.append(contentsOf: Array("/fixture/loader".utf8) + [0, 0, 0])
+        for argument in arguments { data.append(contentsOf: Array(argument.utf8) + [0]) }
+        data.append(contentsOf: Array("DO_NOT_PARSE=Other.exe".utf8) + [0, 0])
+        checks.expectEqual(CompatibilityProcessAccess.parseArguments(data), arguments)
+        checks.expectNil(CompatibilityProcessAccess.parseArguments(Data()))
+        checks.expectNil(CompatibilityProcessAccess.parseArguments(data.prefix(8)))
+        checks.expectNil(CompatibilityProcessAccess.parseArguments(Data([1, 0, 0])))
+    }
+
+    func testFilesystemIdentityIgnoresDirectoryURLHintAndTrailingSlash() {
+        let directoryURL = URL(filePath: "/fixture/Wrapper.app", directoryHint: .isDirectory)
+        let fileURL = URL(filePath: "/fixture/Wrapper.app", directoryHint: .notDirectory)
+        checks.expectTrue(CompatibilityRuleEngine.pathsMatch(directoryURL.path, fileURL.path))
+        checks.expectTrue(CompatibilityRuleEngine.pathsMatch("/fixture/Wrapper.app/", "/fixture/Wrapper.app"))
+        let identity = CompatibilityProcessIdentity(
+            appId: wrapperIdentity.appId, bundlePath: directoryURL.path,
+            executablePath: wrapperIdentity.executablePath,
+        )
+        checks.expectEqual(CompatibilityRuleEngine.resolveProcess(
+            rules: [applicationRule()], reportedPID: -1, identity: identity,
+            ownerPIDs: { [101] }, processPath: { _ in self.wrapperIdentity.executablePath },
+        )?.pid, 101)
+        checks.expectEqual(CompatibilityRuleEngine.pathsMatch("/fixture/Wrapper.app.other", "/fixture/Wrapper.app"), false)
+        checks.expectEqual(CompatibilityRuleEngine.pathsMatch("relative/Wrapper.app", "/fixture/Wrapper.app"), false)
     }
 
     private func fixtureWindow(
-        title: String = "ZenlessZoneZero",
-        size: CGSize = CGSize(width: 1920, height: 1080),
-        focused: Bool = false,
-        nativeFullscreen: Bool = false,
+        title: String = "Example client", role: String = kAXWindowRole, subrole: String = kAXUnknownSubrole,
+        size: CGSize = CGSize(width: 1920, height: 1080), focused: Bool = false, fullscreen: Bool? = false,
+        fullscreenButtonEnabled: Bool = false,
     ) -> FixtureAxElement {
-        FixtureAxElement(fields: [
-            kAXRoleAttribute: kAXWindowRole,
-            kAXSubroleAttribute: kAXUnknownSubrole,
-            kAXTitleAttribute: title,
-            kAXSizeAttribute: size,
-            "AXFullScreen": nativeFullscreen,
-            kAXFocusedAttribute: focused,
-            kAXMainAttribute: focused,
-        ])
+        var fields: [String: Any] = [
+            kAXRoleAttribute: role, kAXSubroleAttribute: subrole, kAXTitleAttribute: title,
+            kAXSizeAttribute: size, kAXFocusedAttribute: focused, kAXMainAttribute: focused,
+        ]
+        if let fullscreen { fields["AXFullScreen"] = fullscreen }
+        if fullscreenButtonEnabled {
+            fields[kAXFullScreenButtonAttribute] = FixtureAxElement(fields: [kAXEnabledAttribute: true])
+        }
+        return FixtureAxElement(fields: fields)
     }
 }
 
 private struct FixtureAxElement: AxUiElementMock {
     let fields: [String: Any]
-
     func get<Attr: ReadableAttr>(_ attr: Attr) -> Attr.T? { fields[attr.key] as? Attr.T }
     func containingWindowId() -> CGWindowID? { 42 }
 }
 
-
-final class YaaglLauncherOfflineCases {
-    let checks: CheckRunner
-    init(_ checks: CheckRunner) { self.checks = checks }
-    func testPositiveNativePIDBypassesLauncherFallback() {
-        var reads = 0
-        let result = YaaglLauncherProcessIdentity.resolve(
-            reportedPID: 42, bundleID: nil, bundleURL: nil, executableURL: nil,
-            ownerPIDs: { reads += 1; return [] },
-            processPath: { _ in reads += 1; return nil },
-        )
-        checks.expectEqual(result?.pid, 42)
-        checks.expectNil(result?.profile)
-        checks.expectEqual(reads, 0)
-    }
-
-    func testEachKnownLauncherRecoversOneVerifiedWindowOwner() {
-        for profile in YaaglLauncherProcessIdentity.profiles {
-            let reportedPIDs: [Int32] = [-1, 0]
-            for reportedPID in reportedPIDs {
-                let result = YaaglLauncherProcessIdentity.resolve(
-                    reportedPID: reportedPID,
-                    bundleID: profile.bundleID,
-                    bundleURL: URL(filePath: profile.bundlePath),
-                    executableURL: URL(filePath: profile.executablePath),
-                    ownerPIDs: { [-1, 0, 101, 101, 202] },
-                    processPath: { $0 == 101 ? profile.executablePath : "/Applications/Other.app/Contents/MacOS/Yaagl" },
-                )
-                checks.expectEqual(result?.pid, 101)
-                checks.expectEqual(result?.profile, profile)
-            }
-        }
-    }
-
-    func testUnrecognizedOrMismatchedBundleMetadataNeverReadsProcesses() {
-        let profile = YaaglLauncherProcessIdentity.profiles[0]
-        var reads = 0
-        let metadata: [(String?, URL?, URL?)] = [
-            (nil, URL(filePath: profile.bundlePath), URL(filePath: profile.executablePath)),
-            ("com.tencent.xinWeChat", URL(filePath: profile.bundlePath), URL(filePath: profile.executablePath)),
-            (profile.bundleID, nil, URL(filePath: profile.executablePath)),
-            (profile.bundleID, URL(filePath: profile.bundlePath), nil),
-            (profile.bundleID, URL(filePath: "/tmp/Yaagl.app"), URL(filePath: profile.executablePath)),
-            (profile.bundleID, URL(filePath: profile.bundlePath), URL(filePath: profile.bundlePath + "/Contents/MacOS/parameterized")),
-            (profile.bundleID, URL(filePath: profile.bundlePath), URL(filePath: profile.executablePath + "Helper")),
-        ]
-        for (bundleID, bundleURL, executableURL) in metadata {
-            checks.expectNil(YaaglLauncherProcessIdentity.resolve(
-                reportedPID: -1, bundleID: bundleID, bundleURL: bundleURL, executableURL: executableURL,
-                ownerPIDs: { reads += 1; return [101] },
-                processPath: { _ in reads += 1; return profile.executablePath },
-            ))
-        }
-        checks.expectEqual(reads, 0)
-    }
-
-    func testMissingWrongAndAmbiguousOwnerIdentitiesFailClosed() {
-        let profile = YaaglLauncherProcessIdentity.profiles[0]
-        let cases: [([Int32], [Int32: String])] = [
-            ([], [:]),
-            ([-1, 0], [:]),
-            ([101], [:]),
-            ([101], [101: "/Applications/WeChat.app/Contents/MacOS/WeChat"]),
-            ([101], [101: profile.executablePath + "Helper"]),
-            ([101], [101: YaaglLauncherProcessIdentity.profiles[1].executablePath]),
-            ([101, 202], [101: profile.executablePath, 202: profile.executablePath]),
-        ]
-        for (owners, paths) in cases {
-            checks.expectNil(YaaglLauncherProcessIdentity.resolve(
-                reportedPID: -1, bundleID: profile.bundleID,
-                bundleURL: URL(filePath: profile.bundlePath), executableURL: URL(filePath: profile.executablePath),
-                ownerPIDs: { owners }, processPath: { paths[$0] },
-            ))
-        }
-    }
+private final class CountingAxElement: AxUiElementMock {
+    var reads = 0
+    func get<Attr: ReadableAttr>(_ attr: Attr) -> Attr.T? { reads += 1; return nil }
+    func containingWindowId() -> CGWindowID? { nil }
 }
 
 extension [String: Json]: AxUiElementMock {
@@ -582,27 +426,21 @@ private func fixtureAxObject(_ value: Json) -> [String: Json]? {
 
 
 let checks = CheckRunner()
-let cases = YaaglGameOfflineCases(checks)
-let launcherCases = YaaglLauncherOfflineCases(checks)
-checks.run("testCompatibilityFlagsDefaultOffAndAcceptOnlyBooleanMetadata") { cases.testCompatibilityFlagsDefaultOffAndAcceptOnlyBooleanMetadata() }
-checks.run("testExplicitCompatibilityFlagsOverrideBundleDefaults") { cases.testExplicitCompatibilityFlagsOverrideBundleDefaults() }
-checks.run("testCompatibilityFlagsRemainIndependentForEveryLaunchMethod") { cases.testCompatibilityFlagsRemainIndependentForEveryLaunchMethod() }
-checks.run("testOptInAndWinePathAreRequiredBeforeReadingArguments") { cases.testOptInAndWinePathAreRequiredBeforeReadingArguments() }
-checks.run("testFirstWindowsExecutableMustBeZZZ") { cases.testFirstWindowsExecutableMustBeZZZ() }
-checks.run("testObservedMainWindowStaysFloatingWhenUnfocusedAndLevelChanges") { try cases.testObservedMainWindowStaysFloatingWhenUnfocusedAndLevelChanges() }
-checks.run("testDefaultClassificationRemainsPopupWithoutVerifiedProcess") { cases.testDefaultClassificationRemainsPopupWithoutVerifiedProcess() }
-checks.run("testUnrelatedAXUnknownWindowsAreNotAdmitted") { try cases.testUnrelatedAXUnknownWindowsAreNotAdmitted() }
-checks.run("testProcessArgumentsParserStopsBeforeEnvironment") { cases.testProcessArgumentsParserStopsBeforeEnvironment() }
-checks.run("testHSRMainWindowStaysFloatingWhenUnfocusedAndLevelChanges") { try cases.testHSRMainWindowStaysFloatingWhenUnfocusedAndLevelChanges() }
-checks.run("testHSRRejectsThinAndUnnamedAuxiliaryWindows") { try cases.testHSRRejectsThinAndUnnamedAuxiliaryWindows() }
-checks.run("testGameProfilesCannotCrossMatch") { try cases.testGameProfilesCannotCrossMatch() }
-checks.run("testGIAcceptsOnlyKnownClientExecutables") { cases.testGIAcceptsOnlyKnownClientExecutables() }
-checks.run("testGIKnownMainWindowTitlesStayFloatingWithoutFocus") { try cases.testGIKnownMainWindowTitlesStayFloatingWithoutFocus() }
-checks.run("testGIRejectsUnverifiedAndAuxiliaryWindows") { try cases.testGIRejectsUnverifiedAndAuxiliaryWindows() }
-checks.run("testPositiveNativePIDBypassesLauncherFallback") { launcherCases.testPositiveNativePIDBypassesLauncherFallback() }
-checks.run("testEachKnownLauncherRecoversOneVerifiedWindowOwner") { launcherCases.testEachKnownLauncherRecoversOneVerifiedWindowOwner() }
-checks.run("testUnrecognizedOrMismatchedBundleMetadataNeverReadsProcesses") { launcherCases.testUnrecognizedOrMismatchedBundleMetadataNeverReadsProcesses() }
-checks.run("testMissingWrongAndAmbiguousOwnerIdentitiesFailClosed") { launcherCases.testMissingWrongAndAmbiguousOwnerIdentitiesFailClosed() }
+let cases = CompatibilityOfflineCases(checks)
+checks.run("testNativePositivePIDBypassesRecoveryAndNoRulesRejectInvalidPID") { cases.testNativePositivePIDBypassesRecoveryAndNoRulesRejectInvalidPID() }
+checks.run("testPIDRecoveryUsesExactConfiguredIdentityAndUniqueOwner") { cases.testPIDRecoveryUsesExactConfiguredIdentityAndUniqueOwner() }
+checks.run("testRecoveryNeverBroadensMissingOrMismatchedMetadata") { cases.testRecoveryNeverBroadensMissingOrMismatchedMetadata() }
+checks.run("testFirstExecutableArgumentIsGenericExactAndCaseInsensitive") { cases.testFirstExecutableArgumentIsGenericExactAndCaseInsensitive() }
+checks.run("testProcessPrefilterReadsArgumentsOnlyOnceAndNeverForUnmatchedRules") { cases.testProcessPrefilterReadsArgumentsOnlyOnceAndNeverForUnmatchedRules() }
+checks.run("testWindowRuleCanUseExactAppIDWithoutExecutablePath") { cases.testWindowRuleCanUseExactAppIDWithoutExecutablePath() }
+checks.run("testMatchingWindowsStayFloatingAcrossFocusAndLevelChanges") { cases.testMatchingWindowsStayFloatingAcrossFocusAndLevelChanges() }
+checks.run("testFloatingActionOverridesOrdinaryNonDialogWindowAndNoMatchPreservesDefault") { cases.testFloatingActionOverridesOrdinaryNonDialogWindowAndNoMatchPreservesDefault() }
+checks.run("testWindowTraitsRejectAuxiliaryAndUnverifiedWindows") { cases.testWindowTraitsRejectAuxiliaryAndUnverifiedWindows() }
+checks.run("testRuleOrderSelectsTheFirstMatchingWindowID") { cases.testRuleOrderSelectsTheFirstMatchingWindowID() }
+checks.run("testEmptyCompatibilityRulesDoNotReadExtraAXAttributes") { cases.testEmptyCompatibilityRulesDoNotReadExtraAXAttributes() }
+checks.run("testMalformedWindowRulesFallBackToDefaultHeuristics") { cases.testMalformedWindowRulesFallBackToDefaultHeuristics() }
+checks.run("testArgumentParserStopsBeforeEnvironmentAndRejectsTruncation") { cases.testArgumentParserStopsBeforeEnvironmentAndRejectsTruncation() }
+checks.run("testFilesystemIdentityIgnoresDirectoryURLHintAndTrailingSlash") { cases.testFilesystemIdentityIgnoresDirectoryURLHintAndTrailingSlash() }
 let repoRoot = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 checks.run("upstream axDumps corpus") { try checkUpstreamAxDumps(repoRoot.appending(path: "axDumps"), checks) }
 print("Offline checks: \(checks.groups) groups, \(checks.assertions) assertions, \(checks.fixtures) upstream fixtures, \(checks.failures) failures")

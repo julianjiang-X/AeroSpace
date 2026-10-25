@@ -103,19 +103,9 @@ extension AxUiElementMock {
         _ id: KnownBundleId?,
         _ activationPolicy: NSApplication.ActivationPolicy,
         _ windowLevel: MacOsWindowLevel?,
-        yaaglGameCompatibility: YaaglGameCompatibilityProfile? = nil,
+        compatibilityRules: CompatibilityWindowRules = .empty,
     ) -> Bool {
-        if id == nil, yaaglGameCompatibility?.matchesMainWindow(
-            role: get(Ax.roleAttr),
-            subrole: get(Ax.subroleAttr),
-            title: get(Ax.titleAttr),
-            size: get(Ax.sizeAttr),
-            activationPolicy: activationPolicy,
-            windowLevel: windowLevel,
-            isNativeFullscreen: get(Ax.isFullscreenAttr),
-        ) == true {
-            return true
-        }
+        if matchedCompatibilityRule(compatibilityRules, activationPolicy, windowLevel) != nil { return true }
 
         if windowLevel != .normalWindow &&
             // Slowly roll out windowLevel for applications for which we have the appropriate dumps
@@ -212,15 +202,30 @@ extension AxUiElementMock {
             id == .finder && subrole == "Quick Look" // Finder preview (hit space) is a floating window
     }
 
+    func matchedCompatibilityRule(
+        _ rules: CompatibilityWindowRules,
+        _ activationPolicy: NSApplication.ActivationPolicy,
+        _ windowLevel: MacOsWindowLevel?,
+    ) -> CompatibilityRule? {
+        guard !rules.rules.isEmpty else { return nil }
+        return rules.matchedRule(
+            role: get(Ax.roleAttr), subrole: get(Ax.subroleAttr),
+            title: get(Ax.titleAttr), size: get(Ax.sizeAttr),
+            activationPolicy: activationPolicy, windowLevel: windowLevel,
+            nativeFullscreen: get(Ax.isFullscreenAttr),
+        )
+    }
+
     func getWindowType(
         axApp: AxUiElementMock,
         _ id: KnownBundleId?,
         _ activationPolicy: NSApplication.ActivationPolicy,
         _ windowLevel: MacOsWindowLevel?,
-        yaaglGameCompatibility: YaaglGameCompatibilityProfile? = nil,
+        compatibilityRules: CompatibilityWindowRules = .empty,
     ) -> AxUiElementWindowType {
-        .new(
-            isWindow: isWindowHeuristic(axApp: axApp, id, activationPolicy, windowLevel, yaaglGameCompatibility: yaaglGameCompatibility),
+        if matchedCompatibilityRule(compatibilityRules, activationPolicy, windowLevel) != nil { return .dialog }
+        return .new(
+            isWindow: isWindowHeuristic(axApp: axApp, id, activationPolicy, windowLevel),
             isDialog: { isDialogHeuristic(id, windowLevel) },
         )
     }

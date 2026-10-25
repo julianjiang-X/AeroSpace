@@ -9,8 +9,8 @@ final class MacApp: AbstractApp {
     /*conforms*/ let rawAppBundleId: String?
     let appId: KnownBundleId?
     let nsApp: NSRunningApplication
-    private let yaaglLauncherProfile: YaaglLauncherProcessIdentity.Profile?
-    private let yaaglGameCompatibility: YaaglGameCompatibilityProfile?
+    private let pidRecoveryRule: CompatibilityRule?
+    private let windowCompatibilityRules: CompatibilityWindowRules
     private let axApp: ThreadGuardedValue<AXUIElement>
     private let appAxSubscriptions: ThreadGuardedValue<[AxSubscription]> // keep subscriptions in memory
     private let windows: ThreadGuardedValue<[UInt32: AxWindow]> = .init([:])
@@ -31,7 +31,8 @@ final class MacApp: AbstractApp {
 
     private init(
         _ nsApp: NSRunningApplication,
-        _ process: YaaglLauncherProcessIdentity.Resolution,
+        _ process: CompatibilityProcessResolution,
+        _ windowCompatibilityRules: CompatibilityWindowRules,
         _ axApp: AXUIElement,
         _ axSubscriptions: [AxSubscription],
         _ thread: Thread,
@@ -39,12 +40,10 @@ final class MacApp: AbstractApp {
         self.nsApp = nsApp
         self.axApp = .init(axApp)
         self.pid = process.pid
-        self.yaaglLauncherProfile = process.profile
+        self.pidRecoveryRule = process.recoveryRule
+        self.windowCompatibilityRules = windowCompatibilityRules
         self.rawAppBundleId = nsApp.bundleIdentifier
         self.appId = nsApp.bundleIdentifier.flatMap { KnownBundleId.init(rawValue: $0) }
-        self.yaaglGameCompatibility = nsApp.bundleIdentifier == nil
-            ? YaaglGameCompatibilityProfile.detect(pid: process.pid, executableURL: nsApp.executableURL)
-            : nil
         assert(!axSubscriptions.isEmpty)
         self.appAxSubscriptions = .init(axSubscriptions)
         self.thread = thread
@@ -56,7 +55,15 @@ final class MacApp: AbstractApp {
         // Don't perceive any of the lock screen windows as real windows
         // Otherwise, false positive ax notifications might trigger that lead to gcWindows
         if nsApp.bundleIdentifier == lockScreenAppBundleId { return nil }
-        guard let process = YaaglLauncherProcessIdentity.resolve(nsApp) else { return nil }
+        let compatibilityRules = config.compatibilityRules
+        let identity = CompatibilityProcessIdentity(nsApp)
+        guard let process = CompatibilityRuleEngine.resolveProcess(
+            rules: compatibilityRules,
+            reportedPID: nsApp.processIdentifier,
+            identity: identity,
+            ownerPIDs: CompatibilityProcessAccess.windowOwnerPIDs,
+            processPath: CompatibilityProcessAccess.executablePath,
+        ) else { return nil }
         let pid = process.pid
         // AX requests crash if you send them to yourself
         if pid == myPid { return nil }
@@ -79,7 +86,11 @@ final class MacApp: AbstractApp {
                 let job = RunLoopJob(.cancellable)
                 let subscriptions = (try? unsafe AxSubscription.bulkSubscribe(pid, axApp, job, handlers)) ?? []
                 let isGood = !subscriptions.isEmpty
-                let app = isGood ? MacApp(nsApp, process, axApp, subscriptions, Thread.current) : nil
+                let windowRules = CompatibilityRuleEngine.windowRules(
+                    rules: compatibilityRules, identity: identity,
+                    arguments: { CompatibilityProcessAccess.arguments(pid) },
+                )
+                let app = isGood ? MacApp(nsApp, process, windowRules, axApp, subscriptions, Thread.current) : nil
 
                 let appAxSubscriptionsThreadGuarded = app?.appAxSubscriptions
                 let windowsThreadGuarded = app?.windows
@@ -138,8 +149,8 @@ final class MacApp: AbstractApp {
     @MainActor func nativeFocus(_ windowId: UInt32) {
         if serverArgs.isReadOnly { return }
         MacApp.focusJob?.cancel()
-        if let yaaglLauncherProfile {
-            guard YaaglLauncherProcessIdentity.stillMatches(pid: pid, profile: yaaglLauncherProfile) else { return }
+        if let pidRecoveryRule {
+            guard CompatibilityProcessAccess.stillMatches(pid: pid, recoveryRule: pidRecoveryRule) else { return }
             MacApp.focusJob = withWindowAsync(windowId, .cancellable) { [axApp] window, job in
                 window.set(Ax.isMainAttr, true)
                 AXUIElementPerformAction(window, kAXRaiseAction as CFString)
@@ -212,20 +223,21 @@ final class MacApp: AbstractApp {
     }
 
     func isWindowHeuristic(_ windowId: UInt32, _ windowLevel: MacOsWindowLevel?, _ cm: CancellationMode) async throws -> Bool {
-        return try await withWindow(windowId, cm) { [nsApp, axApp, appId, yaaglGameCompatibility] window, job in
-            window.isWindowHeuristic(axApp: axApp.threadGuarded, appId, nsApp.activationPolicy, windowLevel, yaaglGameCompatibility: yaaglGameCompatibility)
+        return try await withWindow(windowId, cm) { [nsApp, axApp, appId, windowCompatibilityRules] window, job in
+            window.isWindowHeuristic(axApp: axApp.threadGuarded, appId, nsApp.activationPolicy, windowLevel, compatibilityRules: windowCompatibilityRules)
         } == true
     }
 
     func getAxUiElementWindowType(_ windowId: UInt32, _ windowLevel: MacOsWindowLevel?, _ cm: CancellationMode) async throws -> AxUiElementWindowType {
-        return try await withWindow(windowId, cm) { [nsApp, axApp, appId, yaaglGameCompatibility] window, job in
-            window.getWindowType(axApp: axApp.threadGuarded, appId, nsApp.activationPolicy, windowLevel, yaaglGameCompatibility: yaaglGameCompatibility)
+        return try await withWindow(windowId, cm) { [nsApp, axApp, appId, windowCompatibilityRules] window, job in
+            window.getWindowType(axApp: axApp.threadGuarded, appId, nsApp.activationPolicy, windowLevel, compatibilityRules: windowCompatibilityRules)
         } ?? .window
     }
 
     func isDialogHeuristic(_ windowId: UInt32, _ windowLevel: MacOsWindowLevel?, _ cm: CancellationMode) async throws -> Bool {
-        try await withWindow(windowId, cm) { [appId] window, job in
-            window.isDialogHeuristic(appId, windowLevel)
+        try await withWindow(windowId, cm) { [appId, nsApp, windowCompatibilityRules] window, job in
+            window.matchedCompatibilityRule(windowCompatibilityRules, nsApp.activationPolicy, windowLevel) != nil ||
+                window.isDialogHeuristic(appId, windowLevel)
         } == true
     }
 
@@ -244,24 +256,29 @@ final class MacApp: AbstractApp {
     }
 
     func dumpWindowAxInfo(windowId: UInt32, _ cm: CancellationMode) async throws -> [String: Json] {
-        try await withWindow(windowId, cm) { window, job in
-            dumpAxRecursive(window, .window)
+        let level = await getWindowLevel(for: windowId)
+        return try await withWindow(windowId, cm) { [windowCompatibilityRules, nsApp, pid, pidRecoveryRule] window, job in
+            var result = dumpAxRecursive(window, .window)
+            let matched = window.matchedCompatibilityRule(windowCompatibilityRules, nsApp.activationPolicy, level)
+            result["Aero.Compatibility"] = .dict([
+                "matchedRuleID": .stringOrNull(matched?.id ?? pidRecoveryRule?.id),
+                "applicationRuleID": .stringOrNull(pidRecoveryRule?.id),
+                "windowRuleID": .stringOrNull(matched?.id),
+                "reportedPID": .int(Int(nsApp.processIdentifier)),
+                "resolvedPID": .int(Int(pid)),
+            ])
+            return result
         } ?? [:]
     }
 
     func dumpAppAxInfo(_ cm: CancellationMode) async throws -> [String: Json] {
-        try await thread?.runInLoop(cm) { [axApp, yaaglGameCompatibility, yaaglLauncherProfile, nsApp, pid] job in
+        try await thread?.runInLoop(cm) { [axApp, pidRecoveryRule, nsApp, pid] job in
             var result = dumpAxRecursive(axApp.threadGuarded, .app)
-            result["Aero.YaaglLauncherProcessIdentity"] = .dict([
+            result["Aero.Compatibility"] = .dict([
+                "matchedRuleID": .stringOrNull(pidRecoveryRule?.id),
+                "applicationRuleID": .stringOrNull(pidRecoveryRule?.id),
                 "reportedPID": .int(Int(nsApp.processIdentifier)),
                 "resolvedPID": .int(Int(pid)),
-                "fallbackBundleID": .stringOrNull(yaaglLauncherProfile?.bundleID),
-            ])
-            result["Aero.YaaglGameCompatibility"] = .dict([
-                "zzzEnabled": .bool(YaaglGameCompatibilityProfile.enabledGames.contains(.zzz)),
-                "hsrEnabled": .bool(YaaglGameCompatibilityProfile.enabledGames.contains(.hsr)),
-                "giEnabled": .bool(YaaglGameCompatibilityProfile.enabledGames.contains(.gi)),
-                "processProfile": .stringOrNull(yaaglGameCompatibility?.identifier),
             ])
             return result
         } ?? [:]
@@ -289,7 +306,7 @@ final class MacApp: AbstractApp {
     static func refreshAllAndGetAliveWindowIds(frontmostAppBundleId: String?) async throws -> [MacApp: [UInt32]] {
         for (_, app) in MacApp.allAppsMap { // gc dead apps
             try checkCancellation()
-            if app.nsApp.isTerminated || !app.hasValidLauncherProcess {
+            if app.nsApp.isTerminated || !app.hasValidRecoveredProcess {
                 await app.destroy()
             }
         }
@@ -327,7 +344,7 @@ final class MacApp: AbstractApp {
     }
 
     private func refreshAndGetAliveWindowIds(frontmostAppBundleId: String?) async throws -> [UInt32] {
-        if nsApp.isTerminated || !hasValidLauncherProcess {
+        if nsApp.isTerminated || !hasValidRecoveredProcess {
             await destroy()
             return []
         }
@@ -369,8 +386,8 @@ final class MacApp: AbstractApp {
         thread = nil // Disallow all future job submissions
     }
 
-    private var hasValidLauncherProcess: Bool {
-        yaaglLauncherProfile.map { YaaglLauncherProcessIdentity.stillMatches(pid: pid, profile: $0) } ?? true
+    private var hasValidRecoveredProcess: Bool {
+        pidRecoveryRule.map { CompatibilityProcessAccess.stillMatches(pid: pid, recoveryRule: $0) } ?? true
     }
 
     private func withWindow<T>(

@@ -18,6 +18,8 @@ let package = Package(
         .executable(name: "aerospace", targets: ["Cli"]),
         // Don't use this build for release, use xcode instead
         .executable(name: "AeroSpaceApp", targets: ["AeroSpaceApp"]),
+        // Offline classifier checks for CLT-only hosts without XCTest. Run in debug.
+        .executable(name: "zzz-compat-checks", targets: ["ZZZCompatChecks"]),
         // We only need to expose this as a product for xcode
         .library(name: "AppBundle", targets: ["AppBundle"]),
     ],
@@ -65,6 +67,14 @@ let package = Package(
         .executableTarget(
             name: "Cli",
             dependencies: [
+                .target(name: "Common"),
+            ],
+            swiftSettings: swiftSettings,
+        ),
+        .executableTarget(
+            name: "ZZZCompatChecks",
+            dependencies: [
+                .target(name: "AppBundle"),
                 .target(name: "Common"),
             ],
             swiftSettings: swiftSettings,

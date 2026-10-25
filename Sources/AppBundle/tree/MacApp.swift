@@ -9,6 +9,7 @@ final class MacApp: AbstractApp {
     /*conforms*/ let rawAppBundleId: String?
     let appId: KnownBundleId?
     let nsApp: NSRunningApplication
+    private let yaaglGameCompatibility: YaaglGameCompatibilityProfile?
     private let axApp: ThreadGuardedValue<AXUIElement>
     private let appAxSubscriptions: ThreadGuardedValue<[AxSubscription]> // keep subscriptions in memory
     private let windows: ThreadGuardedValue<[UInt32: AxWindow]> = .init([:])
@@ -38,6 +39,9 @@ final class MacApp: AbstractApp {
         self.pid = nsApp.processIdentifier
         self.rawAppBundleId = nsApp.bundleIdentifier
         self.appId = nsApp.bundleIdentifier.flatMap { KnownBundleId.init(rawValue: $0) }
+        self.yaaglGameCompatibility = nsApp.bundleIdentifier == nil
+            ? YaaglGameCompatibilityProfile.detect(pid: nsApp.processIdentifier, executableURL: nsApp.executableURL)
+            : nil
         assert(!axSubscriptions.isEmpty)
         self.appAxSubscriptions = .init(axSubscriptions)
         self.thread = thread
@@ -195,14 +199,14 @@ final class MacApp: AbstractApp {
     }
 
     func isWindowHeuristic(_ windowId: UInt32, _ windowLevel: MacOsWindowLevel?, _ cm: CancellationMode) async throws -> Bool {
-        return try await withWindow(windowId, cm) { [nsApp, axApp, appId] window, job in
-            window.isWindowHeuristic(axApp: axApp.threadGuarded, appId, nsApp.activationPolicy, windowLevel)
+        return try await withWindow(windowId, cm) { [nsApp, axApp, appId, yaaglGameCompatibility] window, job in
+            window.isWindowHeuristic(axApp: axApp.threadGuarded, appId, nsApp.activationPolicy, windowLevel, yaaglGameCompatibility: yaaglGameCompatibility)
         } == true
     }
 
     func getAxUiElementWindowType(_ windowId: UInt32, _ windowLevel: MacOsWindowLevel?, _ cm: CancellationMode) async throws -> AxUiElementWindowType {
-        return try await withWindow(windowId, cm) { [nsApp, axApp, appId] window, job in
-            window.getWindowType(axApp: axApp.threadGuarded, appId, nsApp.activationPolicy, windowLevel)
+        return try await withWindow(windowId, cm) { [nsApp, axApp, appId, yaaglGameCompatibility] window, job in
+            window.getWindowType(axApp: axApp.threadGuarded, appId, nsApp.activationPolicy, windowLevel, yaaglGameCompatibility: yaaglGameCompatibility)
         } ?? .window
     }
 
@@ -233,8 +237,14 @@ final class MacApp: AbstractApp {
     }
 
     func dumpAppAxInfo(_ cm: CancellationMode) async throws -> [String: Json] {
-        try await thread?.runInLoop(cm) { [axApp] job in
-            dumpAxRecursive(axApp.threadGuarded, .app)
+        try await thread?.runInLoop(cm) { [axApp, yaaglGameCompatibility] job in
+            var result = dumpAxRecursive(axApp.threadGuarded, .app)
+            result["Aero.YaaglGameCompatibility"] = .dict([
+                "zzzEnabled": .bool(YaaglGameCompatibilityProfile.enabledGames.contains(.zzz)),
+                "hsrEnabled": .bool(YaaglGameCompatibilityProfile.enabledGames.contains(.hsr)),
+                "processProfile": .stringOrNull(yaaglGameCompatibility?.identifier),
+            ])
+            return result
         } ?? [:]
     }
 

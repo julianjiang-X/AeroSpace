@@ -103,7 +103,20 @@ extension AxUiElementMock {
         _ id: KnownBundleId?,
         _ activationPolicy: NSApplication.ActivationPolicy,
         _ windowLevel: MacOsWindowLevel?,
+        yaaglGameCompatibility: YaaglGameCompatibilityProfile? = nil,
     ) -> Bool {
+        if id == nil, yaaglGameCompatibility?.matchesMainWindow(
+            role: get(Ax.roleAttr),
+            subrole: get(Ax.subroleAttr),
+            title: get(Ax.titleAttr),
+            size: get(Ax.sizeAttr),
+            activationPolicy: activationPolicy,
+            windowLevel: windowLevel,
+            isNativeFullscreen: get(Ax.isFullscreenAttr),
+        ) == true {
+            return true
+        }
+
         if windowLevel != .normalWindow &&
             // Slowly roll out windowLevel for applications for which we have the appropriate dumps
             (id == .slack || id == .chrome || id?.isFirefox == true || id == .braveBrowser || id == .screenstudio || id == .cleanshotx || id == .iterm2 || id == .outlook || id == .codex || id == .wisprFlow)
@@ -204,9 +217,10 @@ extension AxUiElementMock {
         _ id: KnownBundleId?,
         _ activationPolicy: NSApplication.ActivationPolicy,
         _ windowLevel: MacOsWindowLevel?,
+        yaaglGameCompatibility: YaaglGameCompatibilityProfile? = nil,
     ) -> AxUiElementWindowType {
         .new(
-            isWindow: isWindowHeuristic(axApp: axApp, id, activationPolicy, windowLevel),
+            isWindow: isWindowHeuristic(axApp: axApp, id, activationPolicy, windowLevel, yaaglGameCompatibility: yaaglGameCompatibility),
             isDialog: { isDialogHeuristic(id, windowLevel) },
         )
     }

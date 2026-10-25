@@ -1,1 +1,1 @@
-public let aeroSpaceAppVersion = "0.21.3-YAAGL-COMPAT-3"
+public let aeroSpaceAppVersion = "0.21.3-COMPAT-RULES-1"

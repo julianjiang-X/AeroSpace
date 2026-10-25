@@ -16,6 +16,7 @@ import Foundation
 
         await bootstrapConfig_nonCancellable()
         _ = await reloadConfig_nonCancellable()
+        lockCompatibilityRulesForRuntime()
 
         startUnixSocketServer()
         GlobalObserver.initObserver()

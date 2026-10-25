@@ -37,7 +37,10 @@ private let debounceDelay: Duration = .milliseconds(200)
             try await Task.sleep(for: debounceDelay)
             if let token: RunSessionGuard = .isServerEnabled {
                 try await runLightSession(.configAutoReload, token) {
-                    _ = await reloadConfig_nonCancellable()
+                    let result = await reloadConfig_nonCancellable()
+                    // Editors often replace the inode. A rejected candidate must not strand the
+                    // watcher on the old file, otherwise a later correction would be missed.
+                    if !result.isOk { syncConfigFileWatcher() }
                 }
             }
         }

@@ -122,11 +122,13 @@ final class MacWindow: Window {
 
     // todo it's part of the window layout and should be moved to layoutRecursive.swift
     @MainActor
-    func hideInCorner(_ corner: OptimalHideCorner) async throws {
+    func hideInCorner(_ corner: OptimalHideCorner, shouldContinue: @escaping @MainActor () -> Bool = { true }) async throws {
+        guard shouldContinue() else { return }
         guard let nodeMonitor else { return }
         // Don't accidentally override prevUnhiddenEmulationPosition in case of subsequent `hideInCorner` calls
         if !isHiddenInCorner {
             guard let windowRect = try await getAxRect(.cancellable) else { return }
+            guard shouldContinue() else { return }
             // Check for isHiddenInCorner for the second time because of the suspension point above
             if !isHiddenInCorner {
                 let topLeftCorner = windowRect.topLeftCorner
@@ -143,6 +145,7 @@ final class MacWindow: Window {
         switch corner {
             case .bottomLeftCorner:
                 guard let s = try await getAxSize(.cancellable) else { fallthrough }
+                guard shouldContinue() else { return }
                 // Zoom will jump off if you do one pixel offset https://github.com/nikitabobko/AeroSpace/issues/527
                 // todo this ad hoc won't be necessary once I implement optimization suggested by Zalim
                 let onePixelOffset = macApp.appId == .zoom ? .zero : CGPoint(x: 1, y: -1)
@@ -153,6 +156,7 @@ final class MacWindow: Window {
                 let onePixelOffset = macApp.appId == .zoom ? .zero : CGPoint(x: 1, y: 1)
                 p = nodeMonitor.visibleRect.bottomRightCorner - onePixelOffset
         }
+        guard shouldContinue() else { return }
         setAxFrame(p, nil)
     }
 

@@ -4,6 +4,8 @@ import Common
 @MainActor
 private var activeRefreshTask: Task<(), any Error>? = nil
 
+@MainActor private var refreshSessionDepth = 0
+
 @MainActor
 func scheduleCancellableCompleteRefreshSession(
     _ event: RefreshSessionEvent,
@@ -30,13 +32,20 @@ func runHeavyCompleteRefreshSession(
     let state = signposter.beginInterval(#function, "event: \(event) axTaskLocalAppThreadToken: \(axTaskLocalAppThreadToken?.idForDebug)")
     defer { signposter.endInterval(#function, state) }
     if !TrayMenuModel.shared.isEnabled { return }
+    let sessionToken = WorkspaceAffinity.sessionWillStart(event)
+    refreshSessionDepth += 1
+    defer { refreshSessionDepth -= 1 }
     let res = await Result {
+      try await WorkspaceJournal.withNewTransaction(event) {
         try await $refreshSessionEvent.withValue(event) {
             let nativeFocused = try await getNativeFocusedWindow(.cancellable)
             if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
             updateFocusCache(nativeFocused)
 
-            if shouldLayoutWorkspaces && optimisticallyPreLayoutWorkspaces { try await layoutWorkspaces() }
+            if shouldLayoutWorkspaces && optimisticallyPreLayoutWorkspaces &&
+                WorkspaceAffinity.allowsPostObservationLayout(sessionToken, activeDepth: refreshSessionDepth, independent: false) {
+                try await layoutWorkspaces()
+            }
 
             await refreshModel_nonCancellable()
             try await refresh()
@@ -45,8 +54,29 @@ func runHeavyCompleteRefreshSession(
             updateTrayText()
             SecureInputPanel.shared.refresh()
             try await normalizeLayoutReason()
-            if shouldLayoutWorkspaces { try await layoutWorkspaces() }
+            // Other suspended model sessions can still own a temporary rebind.
+            // Normal user layout remains allowed at depth > 1; new automatic
+            // enforcement waits for an exclusive, stable boundary.
+            var didCorrect = false
+            if refreshSessionDepth == 1 &&
+                WorkspaceAffinity.allowsPostObservationLayout(sessionToken, activeDepth: refreshSessionDepth, independent: false) {
+                didCorrect = await WorkspaceAffinity.observeStableBoundary(event)
+            }
+            if shouldLayoutWorkspaces &&
+                WorkspaceAffinity.allowsPostObservationLayout(sessionToken, activeDepth: refreshSessionDepth, independent: false) {
+                if didCorrect {
+                    let mayContinue: @MainActor @Sendable () -> Bool = {
+                        WorkspaceAffinity.allowsPostObservationLayout(sessionToken, activeDepth: refreshSessionDepth, independent: false)
+                    }
+                    try await WorkspaceAffinity.withCorrectionFrameFence {
+                        try await layoutWorkspaces(shouldContinue: mayContinue)
+                    }
+                } else {
+                    try await layoutWorkspaces()
+                }
+            }
         }
+      }
     }
     switch res {
         case .success(()): break
@@ -65,7 +95,11 @@ func runLightSession<T>(
     defer { signposter.endInterval(#function, state) }
     activeRefreshTask?.cancel() // Give priority to runSession
     activeRefreshTask = nil
-    return try await WorkspaceMinimizedRestore.withSelectionSession {
+    WorkspaceAffinity.sessionWillStart(event)
+    refreshSessionDepth += 1
+    defer { refreshSessionDepth -= 1 }
+    return try await WorkspaceJournal.withNewTransaction(event) {
+      try await WorkspaceMinimizedRestore.withSelectionSession {
       try await $refreshSessionEvent.withValue(event) {
         let nativeFocused = try await getNativeFocusedWindow(.cancellable)
         if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
@@ -89,6 +123,33 @@ func runLightSession<T>(
         if !event.isFocusFollowsMouse { scheduleCancellableCompleteRefreshSession(event) }
         return result
       }
+      }
+    }
+}
+
+/// A timer/confirmation pass deliberately avoids updateFocusCache, callbacks and
+/// nativeFocus. Merely running a watchdog must not introduce focus transitions.
+@MainActor
+func runWorkspaceAffinitySession() async {
+    guard refreshSessionDepth == 0, TrayMenuModel.shared.isEnabled,
+          !serverArgs.isReadOnly, config.workspaceRulesEnabled else { return }
+    let event = RefreshSessionEvent.globalObserver("workspace-affinity")
+    let sessionToken = WorkspaceAffinity.sessionWillStart(event)
+    refreshSessionDepth += 1
+    defer { refreshSessionDepth -= 1 }
+    await WorkspaceJournal.withNewTransaction(event) {
+        let changed = await WorkspaceAffinity.observeStableBoundary(event)
+        let mayContinue: @MainActor @Sendable () -> Bool = {
+            WorkspaceAffinity.allowsPostObservationLayout(sessionToken, activeDepth: refreshSessionDepth, independent: true)
+        }
+        if changed && mayContinue() {
+            do {
+                try await WorkspaceAffinity.withCorrectionFrameFence {
+                    try await layoutWorkspaces(shouldContinue: mayContinue)
+                }
+            }
+            catch { WorkspaceJournal.record("correction-layout-failed", reason: "layout-unavailable") }
+        }
     }
 }
 
@@ -157,11 +218,13 @@ enum OptimalHideCorner {
 }
 
 @MainActor
-private func layoutWorkspaces() async throws {
+private func layoutWorkspaces(shouldContinue: @escaping @MainActor () -> Bool = { true }) async throws {
+    guard shouldContinue() else { return }
     if !TrayMenuModel.shared.isEnabled {
         for workspace in Workspace.all {
+            guard shouldContinue() else { return }
             workspace.allLeafWindowsRecursive.forEach { ($0 as! MacWindow).unhideFromCorner() } // todo as!
-            try await workspace.layoutWorkspace() // Unhide tiling windows from corner
+            try await workspace.layoutWorkspace(shouldContinue: shouldContinue) // Unhide tiling windows from corner
         }
         return
     }
@@ -193,14 +256,17 @@ private func layoutWorkspaces() async throws {
 
     // to reduce flicker, first unhide visible workspaces, then hide invisible ones
     for monitor in monitors {
+        guard shouldContinue() else { return }
         let workspace = monitor.activeWorkspace
         workspace.allLeafWindowsRecursive.forEach { ($0 as! MacWindow).unhideFromCorner() } // todo as!
-        try await workspace.layoutWorkspace()
+        try await workspace.layoutWorkspace(shouldContinue: shouldContinue)
     }
     for workspace in Workspace.all where !workspace.isVisible {
+        guard shouldContinue() else { return }
         let corner = monitorToOptimalHideCorner[workspace.workspaceMonitor.rect.topLeftCorner] ?? .bottomRightCorner
         for window in workspace.allLeafWindowsRecursive {
-            try await (window as! MacWindow).hideInCorner(corner) // todo as!
+            guard shouldContinue() else { return }
+            try await (window as! MacWindow).hideInCorner(corner, shouldContinue: shouldContinue) // todo as!
         }
     }
 }

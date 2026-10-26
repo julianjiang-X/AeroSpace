@@ -88,6 +88,7 @@ private func dumpWindowDebugInfo(_ window: Window, _ cm: CancellationMode) async
     result["Aero.axWindowId"] = .int(window.windowId)
     result["Aero.workspace"] = .stringOrNull(window.nodeWorkspace?.name)
     result["Aero.treeNodeParent"] = .string(String(describing: window.parent))
+    result["Aero.WorkspaceAffinity"] = WorkspaceAffinity.diagnostics(windowID: window.windowId)
     result["Aero.macOS.version"] = .string(ProcessInfo().operatingSystemVersionString) // because built-in apps might behave differently depending on the OS version
     result["Aero.App.appBundleId"] = .stringOrNull(window.app.rawAppBundleId)
     result["Aero.App.pid"] = .int(Int(window.app.pid))

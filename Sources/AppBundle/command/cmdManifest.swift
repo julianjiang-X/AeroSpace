@@ -94,6 +94,8 @@ extension CmdArgs {
                 command = WorkspaceCommand(args: self as! WorkspaceCmdArgs)
             case .workspaceBackAndForth:
                 command = WorkspaceBackAndForthCommand(args: self as! WorkspaceBackAndForthCmdArgs)
+            case .workspaceRule:
+                command = WorkspaceRuleCommand(args: self as! WorkspaceRuleCmdArgs)
         }
         check(command.info == Self.info)
         return .cmd(command)

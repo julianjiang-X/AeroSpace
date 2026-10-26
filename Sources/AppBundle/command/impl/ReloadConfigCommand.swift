@@ -82,6 +82,7 @@ func configReloadErrors(
         resetHotKeys()
         config = parseResult.config
         configUrl = result.configUrl
+        WorkspaceAffinity.configurationDidChange()
         await activateMode_nonCancellable(activeMode)
         syncStartAtLogin()
         syncFocusFollowsMouse(config)

@@ -299,10 +299,15 @@ final class MacApp: AbstractApp {
     }
 
     func setAxFrame(_ windowId: UInt32, _ topLeft: CGPoint?, _ size: CGSize?) {
+        let affinityFence = WorkspaceAffinityFrameContext.current
+        if let affinityFence, !affinityFence.isActive { return }
         setFrameJobs.removeValue(forKey: windowId)?.cancel()
-        setFrameJobs[windowId] = withWindowAsync(windowId, .cancellable) { [axApp] window, job in
-            try disableAnimations(app: axApp.threadGuarded, job) {
-                try setFrame(window, topLeft, size, job)
+        setFrameJobs[windowId] = withWindowAsync(windowId, .cancellable) { [axApp, affinityFence] window, job in
+            if let affinityFence, !affinityFence.register(job) { return }
+            defer { affinityFence?.unregister(job) }
+            if affinityFence != nil { try job.checkCancellation() }
+            try disableAnimations(app: axApp.threadGuarded, job, guardedFrame: affinityFence != nil) {
+                try setFrame(window, topLeft, size, job, guardedFrame: affinityFence != nil)
             }
         }
     }
@@ -583,9 +588,10 @@ private func getAxRect(window: AXUIElement, job: RunLoopJob) throws -> Rect? {
     return Rect(topLeftX: topLeftCorner.x, topLeftY: topLeftCorner.y, width: size.width, height: size.height)
 }
 
-private func setFrame(_ window: AXUIElement, _ topLeft: CGPoint?, _ size: CGSize?, _ job: RunLoopJob) throws {
+private func setFrame(_ window: AXUIElement, _ topLeft: CGPoint?, _ size: CGSize?, _ job: RunLoopJob, guardedFrame: Bool = false) throws {
     // Set size and then the position. The order is important https://github.com/nikitabobko/AeroSpace/issues/143
     //                                                        https://github.com/nikitabobko/AeroSpace/issues/335
+    if guardedFrame { try job.checkCancellation() }
     if let size { window.set(Ax.sizeAttr, size) }
     try job.checkCancellation()
     if let topLeft { window.set(Ax.topLeftCornerAttr, topLeft) } else { return }
@@ -596,9 +602,10 @@ private func setFrame(_ window: AXUIElement, _ topLeft: CGPoint?, _ size: CGSize
 // Some undocumented magic
 // References: https://github.com/koekeishiya/yabai/commit/3fe4c77b001e1a4f613c26f01ea68c0f09327f3a
 //             https://github.com/rxhanson/Rectangle/pull/285
-private func disableAnimations<T>(app: AXUIElement, _ job: RunLoopJob, _ body: () throws -> T) throws -> T {
+private func disableAnimations<T>(app: AXUIElement, _ job: RunLoopJob, guardedFrame: Bool = false, _ body: () throws -> T) throws -> T {
     let wasEnabled = app.get(Ax.enhancedUserInterfaceAttr) == true
     if wasEnabled {
+        if guardedFrame { try job.checkCancellation() }
         app.set(Ax.enhancedUserInterfaceAttr, false)
     }
     defer {

@@ -33,6 +33,7 @@ import Foundation
             smartLayoutAtStartup()
             _ = await config.afterStartupCommand.run(.defaultEnv, .emptyStdin)
         }
+        WorkspaceAffinity.start()
     }
 }
 

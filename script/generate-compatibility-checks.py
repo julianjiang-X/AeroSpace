@@ -16,6 +16,12 @@ case_specs = [
     ("config/CompatibilityRulesConfigTest.swift", "CompatibilityRulesConfigTest", "CompatibilityConfigOfflineCases", "configCases"),
     ("config/CompatibilityRulesReloadTest.swift", "CompatibilityRulesReloadTest", "CompatibilityReloadOfflineCases", "reloadCases"),
     ("WorkspaceMinimizedRestorePolicyTest.swift", "WorkspaceMinimizedRestorePolicyTest", "WorkspaceRestoreOfflineCases", "restoreCases"),
+    ("config/WorkspaceRulesConfigTest.swift", "WorkspaceRulesConfigTest", "WorkspaceRulesConfigOfflineCases", "workspaceConfigCases"),
+    ("WorkspaceRuleEngineTest.swift", "WorkspaceRuleEngineTest", "WorkspaceRuleEngineOfflineCases", "workspaceEngineCases"),
+    ("WorkspaceAffinityPolicyTest.swift", "WorkspaceAffinityPolicyTest", "WorkspaceAffinityPolicyOfflineCases", "workspacePolicyCases"),
+    ("WorkspaceAffinityRuntimeTest.swift", "WorkspaceAffinityRuntimeTest", "WorkspaceAffinityRuntimeOfflineCases", "workspaceRuntimeCases"),
+    ("WorkspaceJournalStoreTest.swift", "WorkspaceJournalStoreTest", "WorkspaceJournalStoreOfflineCases", "workspaceJournalCases"),
+    ("WorkspaceJournalSnapshotTest.swift", "WorkspaceJournalSnapshotTest", "WorkspaceJournalSnapshotOfflineCases", "workspaceSnapshotCases"),
 ]
 cases = ""
 case_invocations = []
@@ -160,6 +166,17 @@ func checkUpstreamAxDumps(_ dir: URL, _ checks: CheckRunner) throws {
 
 trailer = '''
 MainActor.assumeIsolated {
+if let index = CommandLine.arguments.firstIndex(of: "--validate-config") {
+    guard index + 1 < CommandLine.arguments.count else { exit(2) }
+    do {
+        let source = try String(contentsOfFile: CommandLine.arguments[index + 1], encoding: .utf8)
+        let parsed = parseConfig(source)
+        let diagnostics = parsed.errors.map { $0.description(.error) } + parsed.warnings.map { $0.description(.warning) }
+        for diagnostic in diagnostics { print(diagnostic) }
+        print("Config validation: \\(parsed.errors.count) errors, \\(parsed.warnings.count) warnings; workspace rules: \\(parsed.config.workspaceRules.count)")
+        exit(diagnostics.isEmpty ? 0 : 1)
+    } catch { print("Config validation failed: \\(error)"); exit(1) }
+}
 let checks = CheckRunner()
 '''
 for _, _, offline_class, variable in case_specs:

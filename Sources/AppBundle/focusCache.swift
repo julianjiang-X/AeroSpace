@@ -8,8 +8,14 @@
         return
     }
     if nativeFocused?.windowId != lastKnownNativeFocusedWindowId {
-        _ = nativeFocused?.focusWindow()
-        lastKnownNativeFocusedWindowId = nativeFocused?.windowId
+        if let nativeFocused {
+            MacApp.cancelPendingNativeFocus()
+            // A restored native window may still be in the global minimized
+            // container. Retry after normalization instead of caching failure.
+            if nativeFocused.focusWindow() { lastKnownNativeFocusedWindowId = nativeFocused.windowId }
+        } else {
+            lastKnownNativeFocusedWindowId = nil
+        }
     }
     nativeFocused?.macAppUnsafe.lastNativeFocusedWindowId = nativeFocused?.windowId
 }

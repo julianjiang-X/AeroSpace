@@ -148,12 +148,15 @@ final class MacApp: AbstractApp {
 
     @MainActor func nativeFocus(_ windowId: UInt32) {
         if serverArgs.isReadOnly { return }
-        MacApp.focusJob?.cancel()
+        MacApp.cancelPendingNativeFocus()
         if let pidRecoveryRule {
             guard CompatibilityProcessAccess.stillMatches(pid: pid, recoveryRule: pidRecoveryRule) else { return }
             MacApp.focusJob = withWindowAsync(windowId, .cancellable) { [axApp] window, job in
+                try job.checkCancellation()
                 window.set(Ax.isMainAttr, true)
+                try job.checkCancellation()
                 AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                try job.checkCancellation()
                 AXUIElementSetAttributeValue(axApp.threadGuarded, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
             }
             return
@@ -169,10 +172,27 @@ final class MacApp: AbstractApp {
             MacApp.focusJob = withWindowAsync(windowId, .cancellable) { [nsApp] window, job in
                 // Raise firstly to make sure that by the time we activate the app, the window would be already on top
                 window.set(Ax.isMainAttr, true)
+                try job.checkCancellation()
                 AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                try job.checkCancellation()
                 nsApp.activate(options: .activateIgnoringOtherApps)
             }
         }
+    }
+
+    @MainActor static func cancelPendingNativeFocus() {
+        focusJob?.cancel()
+        focusJob = nil
+    }
+
+    @MainActor static func resolvedNativePID(_ app: NSRunningApplication?) -> pid_t? {
+        guard let app else { return nil }
+        return CompatibilityRuleEngine.resolveProcess(
+            rules: config.compatibilityRules, reportedPID: app.processIdentifier,
+            identity: CompatibilityProcessIdentity(app),
+            ownerPIDs: CompatibilityProcessAccess.windowOwnerPIDs,
+            processPath: CompatibilityProcessAccess.executablePath
+        )?.pid
     }
 
     func setAxFrame(_ windowId: UInt32, _ topLeft: CGPoint?, _ size: CGSize?) {

@@ -21,5 +21,10 @@ private var focusedApp: (any AbstractApp)? {
 
 @MainActor
 func getNativeFocusedWindow(_ cm: CancellationMode) async throws -> Window? {
-    try await focusedApp?.getFocusedWindow(cm)
+    let window = try await focusedApp?.getFocusedWindow(cm)
+    // AX reads can suspend while another app becomes active. Never publish an
+    // old app's focus after the native foreground has already moved elsewhere.
+    if !isUnitTest, let window,
+       MacApp.resolvedNativePID(NSWorkspace.shared.frontmostApplication) != window.app.pid { return nil }
+    return window
 }

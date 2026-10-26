@@ -54,26 +54,69 @@ struct WorkspaceAffinityNativeSnapshot: Sendable {
     }
 }
 
+/// The fallback PID must be captured by the UI actor from the existing verified
+/// NSWorkspace resolver. Detached AX reads never query NSWorkspace themselves.
+enum WorkspaceAffinityNativeFocusPolicy {
+    static func fallbackPID(systemWidePID: pid_t?, capturedFrontmostPID: pid_t?) -> pid_t? {
+        if let systemWidePID, systemWidePID > 0 { return nil }
+        guard let capturedFrontmostPID, capturedFrontmostPID > 0 else { return nil }
+        return capturedFrontmostPID
+    }
+
+    static func isCurrent(capturedFrontmostPID: pid_t?, currentFrontmostPID: pid_t?, snapshotPID: pid_t?) -> Bool {
+        guard let capturedFrontmostPID, capturedFrontmostPID > 0,
+              let currentFrontmostPID, currentFrontmostPID > 0,
+              let snapshotPID, snapshotPID > 0 else { return false }
+        return capturedFrontmostPID == currentFrontmostPID && currentFrontmostPID == snapshotPID
+    }
+}
+
 struct WorkspaceAffinityNativeFocus: Sendable {
+    enum Source: String, Sendable { case systemWide, applicationFallback }
     let pid: pid_t
     let windowID: UInt32?
+    let source: Source
 
-    static func read() -> Self? {
+    static func read(fallbackPID: pid_t?) -> Self? {
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.3)
         var raw: CFTypeRef?
-        guard unsafe AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &raw) == .success,
-              let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
-        let app = unsafe unsafeBitCast(raw, to: AXUIElement.self)
+        var systemWidePID: pid_t?
+        if unsafe AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &raw) == .success,
+           let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() {
+            let app = unsafe unsafeBitCast(raw, to: AXUIElement.self)
+            AXUIElementSetMessagingTimeout(app, 0.3)
+            var pid: pid_t = 0
+            if unsafe AXUIElementGetPid(app, &pid) == .success, pid > 0 {
+                systemWidePID = pid
+                return focusedWindow(app: app, pid: pid, source: .systemWide, requiresWindow: false)
+            }
+        }
+
+        guard let pid = WorkspaceAffinityNativeFocusPolicy.fallbackPID(
+            systemWidePID: systemWidePID, capturedFrontmostPID: fallbackPID) else { return nil }
+        let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.3)
-        var pid: pid_t = 0
-        guard unsafe AXUIElementGetPid(app, &pid) == .success, pid > 0 else { return nil }
-        var focusedWindowRaw: CFTypeRef?
-        let result = unsafe AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedWindowRaw)
-        let windowID: UInt32?
-        if result == .success, let raw = focusedWindowRaw, CFGetTypeID(raw) == AXUIElementGetTypeID() {
-            windowID = (unsafe unsafeBitCast(raw, to: AXUIElement.self)).containingWindowId()
-        } else { windowID = nil }
-        return .init(pid: pid, windowID: windowID)
+        var actualPID: pid_t = 0
+        guard unsafe AXUIElementGetPid(app, &actualPID) == .success, actualPID == pid else { return nil }
+        // Unlike a valid system-wide focused app, a per-app handle alone cannot
+        // establish focus. Require a real owned focused window as well as the
+        // caller's before/after NSWorkspace PID validation.
+        return focusedWindow(app: app, pid: pid, source: .applicationFallback, requiresWindow: true)
+    }
+
+    private static func focusedWindow(app: AXUIElement, pid: pid_t, source: Source, requiresWindow: Bool) -> Self? {
+        var raw: CFTypeRef?
+        let result = unsafe AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &raw)
+        guard result == .success, let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else {
+            return requiresWindow ? nil : .init(pid: pid, windowID: nil, source: source)
+        }
+        let window = unsafe unsafeBitCast(raw, to: AXUIElement.self)
+        AXUIElementSetMessagingTimeout(window, 0.3)
+        var ownerPID: pid_t = 0
+        guard unsafe AXUIElementGetPid(window, &ownerPID) == .success, ownerPID == pid else { return nil }
+        let id = window.containingWindowId()
+        guard !requiresWindow || id != nil else { return nil }
+        return .init(pid: pid, windowID: id, source: source)
     }
 }

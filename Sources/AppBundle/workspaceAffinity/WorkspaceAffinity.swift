@@ -200,10 +200,14 @@ enum WorkspaceAffinity {
                 stability.forget(windowID: id)
                 continue
             }
-            let nativeFocus = await Task.detached(priority: .utility) { WorkspaceAffinityNativeFocus.read() }.value
+            let capturedFrontPID = MacApp.resolvedNativePID(NSWorkspace.shared.frontmostApplication)
+            let nativeFocus = await Task.detached(priority: .utility) {
+                WorkspaceAffinityNativeFocus.read(fallbackPID: capturedFrontPID)
+            }.value
             guard isCurrent(window, generation: generation, session: session) else { return changed }
             guard let nativeFocus, let frontPID = MacApp.resolvedNativePID(NSWorkspace.shared.frontmostApplication),
-                  frontPID == nativeFocus.pid else {
+                  WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: capturedFrontPID,
+                      currentFrontmostPID: frontPID, snapshotPID: nativeFocus.pid) else {
                 setState(window, rule: rule, result: "deferred-native-focus-unknown")
                 stability.forget(windowID: id)
                 continue
@@ -232,7 +236,10 @@ enum WorkspaceAffinity {
             let finalNative = await Task.detached(priority: .utility) {
                 WorkspaceAffinityNativeSnapshot.read(pid: pid, windowID: id, readTitle: readTitle)
             }.value
-            let finalFocus = await Task.detached(priority: .utility) { WorkspaceAffinityNativeFocus.read() }.value
+            let capturedFinalFrontPID = MacApp.resolvedNativePID(NSWorkspace.shared.frontmostApplication)
+            let finalFocus = await Task.detached(priority: .utility) {
+                WorkspaceAffinityNativeFocus.read(fallbackPID: capturedFinalFrontPID)
+            }.value
             guard isCurrent(window, generation: generation, session: session) else { return changed }
             guard let finalNative, finalNative.stamp == native.stamp,
                   verifiedProcessIdentity(window, snapshot: finalNative) == processIdentity,
@@ -240,7 +247,9 @@ enum WorkspaceAffinity {
                   finalNative.role == native.role, finalNative.subrole == native.subrole,
                   finalNative.title == native.title,
                   let finalFocus, let currentPID = MacApp.resolvedNativePID(NSWorkspace.shared.frontmostApplication),
-                  currentPID == finalFocus.pid, currentPID != pid, finalFocus.windowID != id,
+                  WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: capturedFinalFrontPID,
+                      currentFrontmostPID: currentPID, snapshotPID: finalFocus.pid),
+                  currentPID != pid, finalFocus.windowID != id,
                   !window.macApp.nsApp.isHidden, window.nodeWorkspace?.name == actual,
                   case .standard = window.layoutReason,
                   window.parent?.kind == .floatingWindowsContainer || window.parent?.kind == .tilingContainer,

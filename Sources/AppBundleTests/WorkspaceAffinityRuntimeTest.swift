@@ -4,6 +4,24 @@ import XCTest
 
 @MainActor
 final class WorkspaceAffinityRuntimeTest: XCTestCase {
+    func testNativeFocusFallbackOnlyUsesCapturedPositivePIDAfterSystemWideFailure() {
+        XCTAssertEqual(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: nil, capturedFrontmostPID: 81651), 81651)
+        XCTAssertEqual(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: 0, capturedFrontmostPID: 81651), 81651)
+        XCTAssertNil(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: 42, capturedFrontmostPID: 81651))
+        XCTAssertNil(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: nil, capturedFrontmostPID: nil))
+        XCTAssertNil(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: nil, capturedFrontmostPID: -1))
+        XCTAssertNil(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: nil, capturedFrontmostPID: 0))
+    }
+
+    func testNativeFocusFallbackLosesPermissionWhenForegroundChangesDuringAXRead() {
+        XCTAssertTrue(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: 81651, currentFrontmostPID: 81651, snapshotPID: 81651))
+        XCTAssertFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: 81651, currentFrontmostPID: 7445, snapshotPID: 81651))
+        XCTAssertFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: 81651, currentFrontmostPID: 81651, snapshotPID: 7445))
+        XCTAssertFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: nil, currentFrontmostPID: 81651, snapshotPID: 81651))
+        XCTAssertFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: 81651, currentFrontmostPID: nil, snapshotPID: 81651))
+        XCTAssertFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: -1, currentFrontmostPID: -1, snapshotPID: -1))
+    }
+
     func testQueuedFrameDequeuedAfterFenceInvalidationNeverStarts() {
         let fence = WorkspaceAffinityFrameFence()
         let job = RunLoopJob(.cancellable)

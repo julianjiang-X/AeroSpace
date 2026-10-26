@@ -1069,6 +1069,24 @@ final class WorkspaceAffinityPolicyOfflineCases {
 final class WorkspaceAffinityRuntimeOfflineCases {
     let checks: CheckRunner
     init(_ checks: CheckRunner) { self.checks = checks }
+    func testNativeFocusFallbackOnlyUsesCapturedPositivePIDAfterSystemWideFailure() {
+        checks.expectEqual(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: nil, capturedFrontmostPID: 81651), 81651)
+        checks.expectEqual(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: 0, capturedFrontmostPID: 81651), 81651)
+        checks.expectNil(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: 42, capturedFrontmostPID: 81651))
+        checks.expectNil(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: nil, capturedFrontmostPID: nil))
+        checks.expectNil(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: nil, capturedFrontmostPID: -1))
+        checks.expectNil(WorkspaceAffinityNativeFocusPolicy.fallbackPID(systemWidePID: nil, capturedFrontmostPID: 0))
+    }
+
+    func testNativeFocusFallbackLosesPermissionWhenForegroundChangesDuringAXRead() {
+        checks.expectTrue(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: 81651, currentFrontmostPID: 81651, snapshotPID: 81651))
+        checks.expectFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: 81651, currentFrontmostPID: 7445, snapshotPID: 81651))
+        checks.expectFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: 81651, currentFrontmostPID: 81651, snapshotPID: 7445))
+        checks.expectFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: nil, currentFrontmostPID: 81651, snapshotPID: 81651))
+        checks.expectFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: 81651, currentFrontmostPID: nil, snapshotPID: 81651))
+        checks.expectFalse(WorkspaceAffinityNativeFocusPolicy.isCurrent(capturedFrontmostPID: -1, currentFrontmostPID: -1, snapshotPID: -1))
+    }
+
     func testQueuedFrameDequeuedAfterFenceInvalidationNeverStarts() {
         let fence = WorkspaceAffinityFrameFence()
         let job = RunLoopJob(.cancellable)
@@ -1199,7 +1217,6 @@ final class WorkspaceAffinityRuntimeOfflineCases {
         checks.expectNil(parseCmdArgs(["workspace-rule", "pause", "--window-id", "invalid"].slice).cmdOrNil)
     }
 }
-
 
 
 @MainActor
@@ -1596,6 +1613,8 @@ checks.run("testChangedGenerationIdentityRuleOrWorkspaceStartsNewConfirmation") 
 checks.run("testClockRegressionAndInvalidTimeNeverImmediatelyConfirm") { workspacePolicyCases.testClockRegressionAndInvalidTimeNeverImmediatelyConfirm() }
 checks.run("testCorrectionConflictsBlockUntilExplicitResetOrDeath") { workspacePolicyCases.testCorrectionConflictsBlockUntilExplicitResetOrDeath() }
 checks.run("testSpreadOutCorrectionsExpireButBackwardsTimeCannotBypassBudget") { workspacePolicyCases.testSpreadOutCorrectionsExpireButBackwardsTimeCannotBypassBudget() }
+checks.run("testNativeFocusFallbackOnlyUsesCapturedPositivePIDAfterSystemWideFailure") { workspaceRuntimeCases.testNativeFocusFallbackOnlyUsesCapturedPositivePIDAfterSystemWideFailure() }
+checks.run("testNativeFocusFallbackLosesPermissionWhenForegroundChangesDuringAXRead") { workspaceRuntimeCases.testNativeFocusFallbackLosesPermissionWhenForegroundChangesDuringAXRead() }
 checks.run("testQueuedFrameDequeuedAfterFenceInvalidationNeverStarts") { workspaceRuntimeCases.testQueuedFrameDequeuedAfterFenceInvalidationNeverStarts() }
 checks.run("testNewSessionFenceCancelsOnlyItsAlreadyDequeuedFrameJobs") { workspaceRuntimeCases.testNewSessionFenceCancelsOnlyItsAlreadyDequeuedFrameJobs() }
 checks.run("testFenceStaysValidAfterEnqueueUntilSupersededAndForgetsCompletedJobs") { workspaceRuntimeCases.testFenceStaysValidAfterEnqueueUntilSupersededAndForgetsCompletedJobs() }

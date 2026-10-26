@@ -1,0 +1,110 @@
+= Continuous workspace ownership (local compatibility build)
+
+This opt-in capability keeps configured windows in a declared AeroSpace workspace.
+It is independent of first-detection callbacks and compatibility classification.
+It never starts an application or game.
+
+== Configuration
+
+Existing configurations leave the capability disabled. Enable it explicitly:
+
+[source,toml]
+----
+workspace-rules-enabled = true
+
+[[workspace-rules]]
+id = 'example-home'
+match = { app-id = 'example.launcher', ax-role = 'AXWindow' }
+workspace = 'GAME'
+policy = 'observe'
+----
+
+Use `observe` to record mismatches without moving a window. Change to `enforce`
+after checking the observations. The first matching rule wins; rule IDs must be
+unique. Hot reload updates the rules and invalidates pending corrections.
+Changing existing `compatibility-rules` still follows their separate restart requirement.
+
+A match requires an exact app ID, or an absolute executable path together with
+nonempty Windows guest executable basenames. Optional match keys are
+`bundle-path`, `executable-path`, `app-id-absent`, `first-exe-argument`,
+`window-title`, `ax-role`, and `ax-subrole`. Titles and arrays are exact matches,
+not regular expressions. Unknown keys and invalid types reject the candidate;
+the last valid configuration remains loaded.
+
+[source,toml]
+----
+[[workspace-rules]]
+id = 'example-wine-game'
+match = { executable-path = '/absolute/path/to/wine', app-id-absent = true, first-exe-argument = ['Game.exe'], window-title = ['Game'], ax-role = 'AXWindow', ax-subrole = 'AXUnknown' }
+workspace = 'GAME'
+policy = 'enforce'
+----
+
+The engine verifies the real kernel executable path and process lifetime before
+moving a modeled window. The AXUnknown subrole is valid for an explicitly matched
+compatible game; failed AX reads are a different, deferred state.
+
+== Behavior and boundaries
+
+Checks run after stable model transactions, with a 300 ms confirmation pass and
+a five-second independent fallback. Busy sessions, foreground windows, native
+minimization/fullscreen, hidden apps and unreadable native state defer correction.
+Read-only command sessions do not authorize correction.
+
+Enforcement applies to explicit user moves too. A foreground window is left in
+place until its app loses focus. Background correction preserves the selected
+workspace, native focus and floating/tiling class; it does not restore minimization,
+activate an app or warp the pointer. Physical layout follows the destination
+workspace's monitor assignment.
+
+A window gets at most three correction attempts in thirty seconds before its
+conflict budget blocks further attempts. Resume, a configuration/lifetime change
+or window death resets the relevant budget. This prevents competing automation
+from pulling the same window back and forth indefinitely.
+
+Model generations invalidate stale native reads. Correction layouts alone carry
+a frame fence into the actual AX job queue. New sessions, configuration changes
+and pauses cancel obsolete queued jobs and subsequent geometry writes. A native
+AX call that has already entered the operating system cannot be withdrawn.
+
+== Inspection and temporary moves
+
+[source,sh]
+----
+aerospace workspace-rule status --json
+aerospace workspace-rule status --window-id 123 --json
+aerospace workspace-rule pause --window-id 123
+aerospace workspace-rule resume --window-id 123
+aerospace workspace-rule pause
+aerospace workspace-rule resume
+----
+
+A window pause lasts until resumed or that modeled window closes. Pause without
+a window ID controls all enforcement in the current process. Set
+`workspace-rules-enabled = false` and reload for a persistent off switch.
+Neither pause nor correction launches the application. Status reads report the
+last observed state; immediately after a reload an unsampled window may have no
+matched-rule state yet.
+
+== Journal and provenance
+
+When enabled, JSONL metadata is written asynchronously under
+`~/Library/Logs/AeroSpace/workspace-affinity/`. The writer retains at most thirty
+days and one GiB, rotates by time/size, bounds pending records and reports dropped
+records or write failures through status. Directory/file permissions are 0700/0600.
+
+Records include sequence/time, source category, safe command kind, transaction and
+cause IDs, full loaded-configuration SHA256, build, window/process identity,
+old/new workspace, rule and result. Window text, titles, clipboard, stdin and raw
+process arguments/environment are not journaled. An external CLI source does not
+prove a physical shortcut was pressed.
+
+Direct rebinds are intermediate audit events. Terminal snapshots also detect
+indirect moves of windows inside a reparented container. Workspace moves and
+parent-only changes have separate provenance; when a complete cause cannot be
+proved, the journal marks the terminal observation as unattributed. Independent
+sessions always have fresh active transaction IDs.
+
+This capability can record and correct a future deviation. Its logs cannot
+retroactively establish the cause of a deviation that happened before recording
+was enabled.

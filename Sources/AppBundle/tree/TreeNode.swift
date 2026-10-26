@@ -67,6 +67,8 @@ open class TreeNode: Equatable, AeroAny {
     @MainActor
     @discardableResult
     func bind(to newParent: NonLeafTreeNodeObject, adaptiveWeight: CGFloat, index: Int) -> BindingData? {
+        let journalBefore = WorkspaceJournal.beforeBind(self)
+        defer { WorkspaceJournal.afterBind(self, before: journalBefore) }
         let result = unbindIfBound()
 
         if newParent === NilTreeNode.instance {

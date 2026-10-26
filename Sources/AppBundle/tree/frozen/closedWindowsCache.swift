@@ -54,35 +54,43 @@ struct FrozenWorkspace: Sendable {
     if !closedWindowsCache.windowIds.contains(newlyDetectedWindow.windowId) {
         return false
     }
-    let monitors = monitors
-    let topLeftCornerToMonitor = monitors.grouped { $0.rect.topLeftCorner }
+    return try await WorkspaceJournal.withReason("closed-window-cache-restore") {
+        WorkspaceJournal.record("cache-restore-begin", window: newlyDetectedWindow as? MacWindow,
+            reason: "closed-window-cache-restore")
+        defer {
+            WorkspaceJournal.record("cache-restore-end", window: newlyDetectedWindow as? MacWindow,
+                reason: "closed-window-cache-restore")
+        }
+        let monitors = monitors
+        let topLeftCornerToMonitor = monitors.grouped { $0.rect.topLeftCorner }
 
-    for frozenWorkspace in closedWindowsCache.workspaces {
-        let workspace = Workspace.get(byName: frozenWorkspace.name)
-        _ = topLeftCornerToMonitor[frozenWorkspace.monitor.topLeftCorner]?
-            .singleOrNil()?
-            .setActiveWorkspace(workspace)
-        for frozenWindow in frozenWorkspace.floatingWindows {
-            MacWindow.get(byId: frozenWindow.id)?.bindAsFloatingWindow(to: workspace)
+        for frozenWorkspace in closedWindowsCache.workspaces {
+            let workspace = Workspace.get(byName: frozenWorkspace.name)
+            _ = topLeftCornerToMonitor[frozenWorkspace.monitor.topLeftCorner]?
+                .singleOrNil()?
+                .setActiveWorkspace(workspace)
+            for frozenWindow in frozenWorkspace.floatingWindows {
+                MacWindow.get(byId: frozenWindow.id)?.bindAsFloatingWindow(to: workspace)
+            }
+            for frozenWindow in frozenWorkspace.macosUnconventionalWindows { // Will get fixed by normalizations
+                MacWindow.get(byId: frozenWindow.id)?.bindAsFloatingWindow(to: workspace)
+            }
+            let prevRoot = workspace.rootTilingContainer // Save prevRoot into a variable to avoid it being garbage collected earlier than needed
+            let potentialOrphans = prevRoot.allLeafWindowsRecursive
+            prevRoot.unbindFromParent()
+            restoreTreeRecursive(frozenContainer: frozenWorkspace.rootTilingNode, parent: workspace, index: INDEX_BIND_LAST)
+            for window in (potentialOrphans - workspace.rootTilingContainer.allLeafWindowsRecursive) {
+                try await window.relayoutWindow(on: workspace, .cancellable, forceTile: true)
+            }
         }
-        for frozenWindow in frozenWorkspace.macosUnconventionalWindows { // Will get fixed by normalizations
-            MacWindow.get(byId: frozenWindow.id)?.bindAsFloatingWindow(to: workspace)
-        }
-        let prevRoot = workspace.rootTilingContainer // Save prevRoot into a variable to avoid it being garbage collected earlier than needed
-        let potentialOrphans = prevRoot.allLeafWindowsRecursive
-        prevRoot.unbindFromParent()
-        restoreTreeRecursive(frozenContainer: frozenWorkspace.rootTilingNode, parent: workspace, index: INDEX_BIND_LAST)
-        for window in (potentialOrphans - workspace.rootTilingContainer.allLeafWindowsRecursive) {
-            try await window.relayoutWindow(on: workspace, .cancellable, forceTile: true)
-        }
-    }
 
-    for monitor in closedWindowsCache.monitors {
-        _ = topLeftCornerToMonitor[monitor.topLeftCorner]?
-            .singleOrNil()?
-            .setActiveWorkspace(Workspace.get(byName: monitor.visibleWorkspace))
+        for monitor in closedWindowsCache.monitors {
+            _ = topLeftCornerToMonitor[monitor.topLeftCorner]?
+                .singleOrNil()?
+                .setActiveWorkspace(Workspace.get(byName: monitor.visibleWorkspace))
+        }
+        return true
     }
-    return true
 }
 
 @discardableResult

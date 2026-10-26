@@ -99,10 +99,19 @@ extension Shell where T == any Command {
     @MainActor func run(_ env: CmdEnv, _ io: CmdIo) async -> Int32ExitCode {
         switch self {
             case .cmd(let command):
-                let exitCode = Int32ExitCode(rawValue: await command.run(env, io).rawValue)
-                if command.shouldResetClosedWindowsCache { resetClosedWindowsCache() }
-                await refreshModel_nonCancellable()
-                return exitCode
+                let requestedWorkspace: String?
+                if let move = command as? MoveNodeToWorkspaceCommand,
+                   case .direct(let workspace) = move.args.target.val {
+                    requestedWorkspace = workspace.raw
+                } else {
+                    requestedWorkspace = nil
+                }
+                return await WorkspaceJournal.withCommand(command.info.kind, requestedWorkspace: requestedWorkspace) {
+                    let exitCode = Int32ExitCode(rawValue: await command.run(env, io).rawValue)
+                    if command.shouldResetClosedWindowsCache { resetClosedWindowsCache() }
+                    await refreshModel_nonCancellable()
+                    return exitCode
+                }
             case .and(let commands): return await runShellAnd(commands, env, io)
             case .empty: return Int32ExitCode(rawValue: EXIT_CODE_ZERO)
             case .or(let commands): return await runShellOr(commands, env, io)

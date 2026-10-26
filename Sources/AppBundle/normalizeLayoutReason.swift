@@ -24,17 +24,32 @@ private func validateStillPopups() async throws {
 private func _normalizeLayoutReason(workspace: Workspace, windows: [Window]) async throws {
     for window in windows {
         let isMacosFullscreen = try await window.isMacosFullscreen(.cancellable)
-        let isMacosMinimized = try await (!isMacosFullscreen).andAsync { @MainActor @Sendable in try await window.isMacosMinimized(.cancellable) }
+        let isMacosMinimized: Bool
+        if !isMacosFullscreen, let native = window as? MacWindow {
+            let minimized = try await native.macApp.isMacosNativeMinimized(window.windowId, .cancellable)
+            if WorkspaceMinimizedRestorePolicy.preserveNativeLayout(
+                eligible: WorkspaceMinimizedRestore.hasQualification(native),
+                minimized: minimized, nativeFullscreen: isMacosFullscreen
+            ) { continue }
+            isMacosMinimized = minimized == true
+            if minimized == false { WorkspaceMinimizedRestore.noteNotMinimized(window) }
+        } else {
+            isMacosMinimized = try await (!isMacosFullscreen).andAsync { @MainActor @Sendable in try await window.isMacosMinimized(.cancellable) }
+        }
         let isMacosWindowOfHiddenApp = !isMacosFullscreen && !isMacosMinimized &&
             !config.automaticallyUnhideMacosHiddenApps && window.macAppUnsafe.nsApp.isHidden
         switch window.layoutReason {
             case .standard:
                 guard let parent = window.parent else { continue }
+                if let native = window as? MacWindow { try await WorkspaceMinimizedRestore.observeEligibility(native) }
                 switch true {
                     case isMacosFullscreen:
                         window.layoutReason = .macos(prevParentKind: parent.kind)
                         window.bind(to: workspace.macOsNativeFullscreenWindowsContainer, adaptiveWeight: WEIGHT_DOESNT_MATTER, index: INDEX_BIND_LAST)
                     case isMacosMinimized:
+                        if let native = window as? MacWindow {
+                            try await WorkspaceMinimizedRestore.remember(native, workspace: workspace, parentKind: parent.kind)
+                        }
                         window.layoutReason = .macos(prevParentKind: parent.kind)
                         window.bind(to: macosMinimizedWindowsContainer, adaptiveWeight: 1, index: INDEX_BIND_LAST)
                     case isMacosWindowOfHiddenApp:
@@ -44,7 +59,8 @@ private func _normalizeLayoutReason(workspace: Workspace, windows: [Window]) asy
                 }
             case .macos(let prevParentKind):
                 if !isMacosFullscreen && !isMacosMinimized && !isMacosWindowOfHiddenApp {
-                    try await exitMacOsNativeUnconventionalState(window: window, prevParentKind: prevParentKind, workspace: workspace, .cancellable)
+                    let destination = WorkspaceMinimizedRestore.rememberedWorkspace(for: window) ?? workspace
+                    try await exitMacOsNativeUnconventionalState(window: window, prevParentKind: prevParentKind, workspace: destination, .cancellable)
                 }
         }
     }

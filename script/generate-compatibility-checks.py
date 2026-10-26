@@ -15,6 +15,7 @@ case_specs = [
     ("CompatibilityRuleEngineTest.swift", "CompatibilityRuleEngineTest", "CompatibilityOfflineCases", "engineCases"),
     ("config/CompatibilityRulesConfigTest.swift", "CompatibilityRulesConfigTest", "CompatibilityConfigOfflineCases", "configCases"),
     ("config/CompatibilityRulesReloadTest.swift", "CompatibilityRulesReloadTest", "CompatibilityReloadOfflineCases", "reloadCases"),
+    ("WorkspaceMinimizedRestorePolicyTest.swift", "WorkspaceMinimizedRestorePolicyTest", "WorkspaceRestoreOfflineCases", "restoreCases"),
 ]
 cases = ""
 case_invocations = []

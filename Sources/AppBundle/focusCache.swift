@@ -10,6 +10,7 @@
     if nativeFocused?.windowId != lastKnownNativeFocusedWindowId {
         if let nativeFocused {
             MacApp.cancelPendingNativeFocus()
+            WorkspaceMinimizedRestore.noteNativeFocus(nativeFocused)
             // A restored native window may still be in the global minimized
             // container. Retry after normalization instead of caching failure.
             if nativeFocused.focusWindow() { lastKnownNativeFocusedWindowId = nativeFocused.windowId }

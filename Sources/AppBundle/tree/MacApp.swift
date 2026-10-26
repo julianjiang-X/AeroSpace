@@ -148,6 +148,7 @@ final class MacApp: AbstractApp {
 
     @MainActor func nativeFocus(_ windowId: UInt32) {
         if serverArgs.isReadOnly { return }
+        if WorkspaceMinimizedRestore.suppressAutomaticFocus { return }
         MacApp.cancelPendingNativeFocus()
         if let pidRecoveryRule {
             guard CompatibilityProcessAccess.stillMatches(pid: pid, recoveryRule: pidRecoveryRule) else { return }
@@ -193,6 +194,108 @@ final class MacApp: AbstractApp {
             ownerPIDs: CompatibilityProcessAccess.windowOwnerPIDs,
             processPath: CompatibilityProcessAccess.executablePath
         )?.pid
+    }
+
+    func minimizedRestoreRule(_ windowId: UInt32, _ cm: CancellationMode) async throws -> CompatibilityRule? {
+        guard windowCompatibilityRules.rules.contains(where: { $0.action.restoreMinimized == .onWorkspaceFocus }) else { return nil }
+        let level = await getWindowLevel(for: windowId)
+        guard CompatibilityRuleEngine.pathsMatch(CompatibilityProcessAccess.executablePath(pid), execPath ?? "") else { return nil }
+        return try await withRestoreWindow(windowId, cm) { [windowCompatibilityRules, nsApp] window, job in
+            guard let rule = window.matchedCompatibilityRule(windowCompatibilityRules, nsApp.activationPolicy, level),
+                  rule.action.restoreMinimized == .onWorkspaceFocus else { return nil }
+            return rule
+        }
+    }
+
+    /// Dynamic window traits may change while minimized. Eligibility was already
+    /// proven against the complete rule; recovery rechecks lifetime identity.
+    func hasMinimizedRestoreIdentity(_ windowId: UInt32, ruleID: String) async throws -> Bool {
+        guard !nsApp.isTerminated,
+              windowCompatibilityRules.rules.contains(where: { $0.id == ruleID && $0.action.restoreMinimized == .onWorkspaceFocus }),
+              CompatibilityRuleEngine.pathsMatch(CompatibilityProcessAccess.executablePath(pid), execPath ?? "") else { return false }
+        return try await withRestoreWindow(windowId) { [pid] window, job in
+            var actualPID: pid_t = 0
+            return window.containingWindowId() == windowId &&
+                AXUIElementGetPid(window, &actualPID) == .success && actualPID == pid
+        } == true
+    }
+
+    private enum MinimizedRestoreError: Error { case rejected, timeout }
+
+    private static func checkRestoreOperation(_ token: RunLoopJob, deadline: ContinuousClock.Instant) throws {
+        try token.checkCancellation()
+        if ContinuousClock.now >= deadline { throw MinimizedRestoreError.timeout }
+    }
+
+    private func withRestoreWindow<T>(_ windowId: UInt32, _ cm: CancellationMode = .cancellable,
+        _ body: @Sendable @escaping (AXUIElement, RunLoopJob) throws -> T?) async throws -> T? {
+        try await withWindow(windowId, cm) { window, job in
+            AXUIElementSetMessagingTimeout(window, 0.3)
+            defer { AXUIElementSetMessagingTimeout(window, 0) }
+            try job.checkCancellation()
+            return try body(window, job)
+        }
+    }
+
+    func prepareMinimizedRestore(_ windowId: UInt32, _ token: RunLoopJob, deadline: ContinuousClock.Instant) async throws {
+        guard !serverArgs.isReadOnly else { return }
+        let result = try await withRestoreWindow(windowId) { window, job in
+            try MacApp.checkRestoreOperation(token, deadline: deadline)
+            return window.set(Ax.minimizedAttr, false)
+        }
+        guard result == true else { throw MinimizedRestoreError.rejected }
+    }
+
+    @MainActor func activateForMinimizedRestore(_ token: RunLoopJob) -> Bool {
+        !token.isCancelled && !serverArgs.isReadOnly && !nsApp.isTerminated && nsApp.activate(options: .activateIgnoringOtherApps)
+    }
+
+    func raiseForMinimizedRestore(_ windowId: UInt32, _ token: RunLoopJob, deadline: ContinuousClock.Instant) async throws {
+        guard !serverArgs.isReadOnly else { return }
+        let result = try await withRestoreWindow(windowId) { window, job in
+            try MacApp.checkRestoreOperation(token, deadline: deadline)
+            _ = window.set(Ax.isMainAttr, true)
+            try job.checkCancellation()
+            try MacApp.checkRestoreOperation(token, deadline: deadline)
+            return AXUIElementPerformAction(window, kAXRaiseAction as CFString) == .success
+        }
+        guard result == true else { throw MinimizedRestoreError.rejected }
+    }
+
+    func frontmostForMinimizedRestore(_ token: RunLoopJob, deadline: ContinuousClock.Instant) async throws {
+        guard !serverArgs.isReadOnly else { return }
+        let result = try await thread?.runInLoop(.cancellable) { [axApp] job in
+            let app = axApp.threadGuarded
+            AXUIElementSetMessagingTimeout(app, 0.3)
+            defer { AXUIElementSetMessagingTimeout(app, 0) }
+            try job.checkCancellation()
+            try MacApp.checkRestoreOperation(token, deadline: deadline)
+            return AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue) == .success
+        }
+        guard result == true else { throw MinimizedRestoreError.rejected }
+    }
+
+    func minimizedRestoreReadback(_ windowId: UInt32) async throws -> Bool {
+        let restored = try await withRestoreWindow(windowId) { [axApp, pid] window, job in
+            guard window.get(Ax.minimizedAttr) == false else { return false }
+            try job.checkCancellation()
+            let app = axApp.threadGuarded
+            AXUIElementSetMessagingTimeout(app, 0.3)
+            defer { AXUIElementSetMessagingTimeout(app, 0) }
+            guard app.get(Ax.focusedWindowAttr)?.windowId == windowId else { return false }
+            let system = AXUIElementCreateSystemWide()
+            AXUIElementSetMessagingTimeout(system, 0.3)
+            var raw: AnyObject?
+            if AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute as CFString, &raw) == .success,
+               let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() {
+                var focusedPID: pid_t = 0
+                if AXUIElementGetPid(raw as! AXUIElement, &focusedPID) == .success, focusedPID != pid { return false }
+            }
+            return true
+        }
+        guard restored == true else { return false }
+        let expectedPID = pid
+        return await MainActor.run { [expectedPID] in NSWorkspace.shared.frontmostApplication?.processIdentifier == expectedPID }
     }
 
     func setAxFrame(_ windowId: UInt32, _ topLeft: CGPoint?, _ size: CGSize?) {
@@ -277,8 +380,10 @@ final class MacApp: AbstractApp {
 
     func dumpWindowAxInfo(windowId: UInt32, _ cm: CancellationMode) async throws -> [String: Json] {
         let level = await getWindowLevel(for: windowId)
+        let restoration = await WorkspaceMinimizedRestore.diagnostics(windowID: windowId, pid: pid)
         return try await withWindow(windowId, cm) { [windowCompatibilityRules, nsApp, pid, pidRecoveryRule] window, job in
             var result = dumpAxRecursive(window, .window)
+            result["Aero.WorkspaceRestore"] = restoration
             let matched = window.matchedCompatibilityRule(windowCompatibilityRules, nsApp.activationPolicy, level)
             result["Aero.Compatibility"] = .dict([
                 "matchedRuleID": .stringOrNull(matched?.id ?? pidRecoveryRule?.id),

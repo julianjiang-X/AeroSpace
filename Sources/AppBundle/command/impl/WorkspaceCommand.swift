@@ -28,13 +28,11 @@ struct WorkspaceCommand: Command {
                 }
         }
         if focusedWs.name == workspaceName {
-            return switch args.failIfNoop {
-                case true: .fail
-                case false:
-                    .succ(io.err("Workspace '\(workspaceName)' is already focused. Tip: use --fail-if-noop to exit with non-zero code"))
-            }
+            if args.failIfNoop { return .fail }
+            WorkspaceMinimizedRestore.request(workspace: focusedWs)
+            return .succ(io.err("Workspace '\(workspaceName)' is already focused. Tip: use --fail-if-noop to exit with non-zero code"))
         } else {
-            return .from(bool: Workspace.get(byName: workspaceName).focusWorkspace())
+            return .from(bool: Workspace.get(byName: workspaceName).focusWorkspace(restoreMinimized: true))
         }
     }
 }

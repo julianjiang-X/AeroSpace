@@ -65,26 +65,30 @@ func runLightSession<T>(
     defer { signposter.endInterval(#function, state) }
     activeRefreshTask?.cancel() // Give priority to runSession
     activeRefreshTask = nil
-    return try await $refreshSessionEvent.withValue(event) {
+    return try await WorkspaceMinimizedRestore.withSelectionSession {
+      try await $refreshSessionEvent.withValue(event) {
         let nativeFocused = try await getNativeFocusedWindow(.cancellable)
         if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
         updateFocusCache(nativeFocused)
         let focusBefore = focus.windowOrNil
 
         await refreshModel_nonCancellable()
-        let result = try await body()
+        let result = try await WorkspaceMinimizedRestore.withExplicitBody { try await body() }
         await refreshModel_nonCancellable()
 
         let focusAfter = focus.windowOrNil
+        let restoreRequest = try await WorkspaceMinimizedRestore.takePendingRequest()
 
         updateTrayText()
         SecureInputPanel.shared.refresh()
         if !event.isFocusFollowsMouse { try await layoutWorkspaces() }
-        if focusBefore != focusAfter {
+        if let restoreRequest { await WorkspaceMinimizedRestore.restore(restoreRequest) }
+        if restoreRequest == nil && !WorkspaceMinimizedRestore.suppressAutomaticFocus && focusBefore != focusAfter {
             focusAfter?.nativeFocus() // syncFocusToMacOs
         }
         if !event.isFocusFollowsMouse { scheduleCancellableCompleteRefreshSession(event) }
         return result
+      }
     }
 }
 

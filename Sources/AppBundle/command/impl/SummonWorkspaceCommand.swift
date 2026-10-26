@@ -9,11 +9,9 @@ struct SummonWorkspaceCommand: Command {
         let workspace = Workspace.get(byName: args.target.val.raw)
         let monitor = focus.workspace.workspaceMonitor
         if monitor.activeWorkspace == workspace {
-            return switch args.failIfNoop {
-                case true: .fail
-                case false:
-                    .succ(io.err("Workspace '\(workspace.name)' is already visible on the focused monitor. Tip: use --fail-if-noop to exit with non-zero code"))
-            }
+            if args.failIfNoop { return .fail }
+            WorkspaceMinimizedRestore.request(workspace: workspace)
+            return .succ(io.err("Workspace '\(workspace.name)' is already visible on the focused monitor. Tip: use --fail-if-noop to exit with non-zero code"))
         }
         let prevMonitor = workspace.isVisible ? workspace.workspaceMonitor : nil
         if monitor.setActiveWorkspace(workspace) {
@@ -24,7 +22,7 @@ struct SummonWorkspaceCommand: Command {
                     "getStubWorkspace generated incompatible stub workspace (\(stubWorkspace)) for the monitor (\(prevMonitor)",
                 )
             }
-            return .from(bool: workspace.focusWorkspace())
+            return .from(bool: workspace.focusWorkspace(restoreMinimized: true))
         } else {
             return .fail(io.err("Can't move workspace '\(workspace.name)' to monitor '\(monitor.name)'. workspace-to-monitor-force-assignment doesn't allow it"))
         }

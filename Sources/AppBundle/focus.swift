@@ -62,6 +62,7 @@ private struct FrozenFocus: AeroAny, Equatable, Sendable {
 
 @MainActor func setFocus(to newFocus: LiveFocus) -> Bool {
     if _focus == newFocus.frozen { return true }
+    WorkspaceMinimizedRestore.focusWillChange(workspace: newFocus.workspace.name, windowID: newFocus.windowOrNil?.windowId)
     let oldFocus = focus
     // Normalize mruWindow when focus away from a workspace
     if oldFocus.workspace != newFocus.workspace {
@@ -88,7 +89,11 @@ extension Window {
     @MainActor func toLiveFocusOrNil() -> LiveFocus? { visualWorkspace.map { LiveFocus(windowOrNil: self, workspace: $0) } }
 }
 extension Workspace {
-    @MainActor func focusWorkspace() -> Bool { setFocus(to: toLiveFocus()) }
+    @MainActor func focusWorkspace(restoreMinimized: Bool = false) -> Bool {
+        let result = setFocus(to: toLiveFocus())
+        if result && restoreMinimized { WorkspaceMinimizedRestore.request(workspace: self) }
+        return result
+    }
 
     func toLiveFocus() -> LiveFocus {
         // todo unfortunately mostRecentWindowRecursive may recursively reach empty rootTilingContainer

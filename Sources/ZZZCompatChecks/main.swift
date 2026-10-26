@@ -407,6 +407,7 @@ final class CompatibilityConfigOfflineCases {
         checks.expectEqual(app.match.executablePath, "/Applications/Launcher.app/Contents/MacOS/Launcher")
         checks.expectEqual(app.action.recoverPid, .windowOwner)
         checks.expectNil(app.action.classify)
+        checks.expectNil(app.action.restoreMinimized)
         let window = result.config.compatibilityRules[1]
         checks.expectEqual(window.phase, .window)
         checks.expectEqual(window.match.firstExeArgument, ["Game.exe"])
@@ -420,6 +421,66 @@ final class CompatibilityConfigOfflineCases {
         checks.expectEqual(window.match.minSize, [640.0, 360.0])
         checks.expectEqual(window.action.classify, .floating)
         checks.expectNil(window.action.recoverPid)
+        checks.expectNil(window.action.restoreMinimized)
+    }
+
+    func testWorkspaceFocusMinimizedRestoreIsOptInAndKeepsExactMatch() {
+        let oldRules = parse(appRule + "\n" + windowRule)
+        let restoringWindowRule = windowRule.replacingOccurrences(
+            of: "classify = 'floating'",
+            with: "classify = 'floating', restore-minimized = 'on-workspace-focus'",
+        )
+        let result = parse(appRule + "\n" + restoringWindowRule)
+        checks.expectTrue(result.errors.isEmpty, "\(result.errors)")
+        checks.expectEqual(result.config.compatibilityRules.count, 2)
+        guard result.config.compatibilityRules.count == 2,
+              oldRules.config.compatibilityRules.count == 2 else { return }
+        checks.expectEqual(result.config.compatibilityRules[0], oldRules.config.compatibilityRules[0])
+        let window = result.config.compatibilityRules[1]
+        checks.expectEqual(window.action.restoreMinimized, .onWorkspaceFocus)
+        checks.expectEqual(window.action.classify, .floating)
+        checks.expectNil(window.action.recoverPid)
+        checks.expectEqual(window.match, oldRules.config.compatibilityRules[1].match)
+        checks.expectTrue(window.isValidFloatingWindowRule)
+    }
+
+    func testMinimizedRestoreRejectsUnknownValuesTypesAndMissingClassification() {
+        for raw in ["'always'", "'on-window-focus'", "'ON-WORKSPACE-FOCUS'", "''", "' '", "true", "1", "['on-workspace-focus']", "{}"] {
+            let rules = windowRule.replacingOccurrences(
+                of: "classify = 'floating'",
+                with: "classify = 'floating', restore-minimized = \(raw)",
+            )
+            let result = parse(rules)
+            checks.expectFalse(result.errors.isEmpty, "Accepted restore-minimized = \(raw)")
+            checks.expectTrue(result.config.compatibilityRules.isEmpty)
+        }
+        for classification in ["", "classify = 'tiled', "] {
+            let rules = windowRule.replacingOccurrences(
+                of: "classify = 'floating'",
+                with: classification + "restore-minimized = 'on-workspace-focus'",
+            )
+            let result = parse(rules)
+            checks.expectFalse(result.errors.isEmpty, "Accepted restore without floating classification")
+            checks.expectTrue(result.config.compatibilityRules.isEmpty)
+        }
+        let app = parse(appRule.replacingOccurrences(
+            of: "recover-pid = 'window-owner'",
+            with: "recover-pid = 'window-owner', restore-minimized = 'on-workspace-focus'",
+        ))
+        checks.expectTrue(app.errors.contains { $0.message == "Unknown key" }, "\(app.errors)")
+        checks.expectTrue(app.config.compatibilityRules.isEmpty)
+    }
+
+    func testMinimizedRestoreCannotBypassWindowIdentityRequirements() {
+        let restoringRule = windowRule.replacingOccurrences(
+            of: "classify = 'floating'",
+            with: "classify = 'floating', restore-minimized = 'on-workspace-focus'",
+        )
+        for removed in ["executable-path = '/opt/game/wine', ", "window-title = ['Game'], ", "ax-role = 'AXWindow', ", "ax-subrole = 'AXUnknown', "] {
+            let result = parse(restoringRule.replacingOccurrences(of: removed, with: ""))
+            checks.expectFalse(result.errors.isEmpty, "Accepted restore after removing \(removed)")
+            checks.expectTrue(result.config.compatibilityRules.isEmpty)
+        }
     }
 
     func testOptionalWindowFieldsAndEmptyRuleList() {
@@ -580,6 +641,170 @@ final class CompatibilityReloadOfflineCases {
         checks.expectTrue(configReloadErrors(warning, currentRules: [], rulesLocked: true, warningsAsErrors: false).isEmpty)
         checks.expectFalse(configReloadErrors(warning, currentRules: [], rulesLocked: true, warningsAsErrors: true).isEmpty)
     }
+
+    func testMinimizedRestoreChangeRequiresRestartAndLeavesOrdinaryReloadAvailable() {
+        let oldRules = parse(windowRule)
+        let restoringRule = windowRule.replacingOccurrences(
+            of: "classify = 'floating'",
+            with: "classify = 'floating', restore-minimized = 'on-workspace-focus'",
+        )
+        let restoring = parse(restoringRule)
+        checks.expectTrue(restoring.errors.isEmpty)
+        for (current, candidate) in [(oldRules, restoring), (restoring, oldRules)] {
+            let errors = configReloadErrors(candidate, currentRules: current.config.compatibilityRules, rulesLocked: true, warningsAsErrors: false)
+            checks.expectEqual(errors.count, 1)
+            checks.expectTrue(errors.first?.message.contains("requires an AeroSpace restart") == true)
+            checks.expectTrue(errors.first?.preventConfigReload == true)
+        }
+        let changedLayout = parse("accordion-padding = 44\n" + restoringRule)
+        checks.expectTrue(configReloadErrors(changedLayout, currentRules: restoring.config.compatibilityRules, rulesLocked: true, warningsAsErrors: false).isEmpty)
+        checks.expectTrue(configReloadErrors(restoring, currentRules: oldRules.config.compatibilityRules, rulesLocked: false, warningsAsErrors: false).isEmpty)
+    }
+
+    func testInvalidMinimizedRestoreCannotPublishPartialConfigOrMaskItsError() {
+        let current = parse(windowRule)
+        let invalid = parse("accordion-padding = 44\n" + windowRule.replacingOccurrences(
+            of: "classify = 'floating'",
+            with: "classify = 'floating', restore-minimized = true",
+        ))
+        checks.expectFalse(invalid.errors.isEmpty)
+        let errors = configReloadErrors(invalid, currentRules: current.config.compatibilityRules, rulesLocked: true, warningsAsErrors: false)
+        checks.expectEqual(errors, invalid.errors)
+        checks.expectFalse(errors.contains { $0.message.contains("requires an AeroSpace restart") })
+    }
+}
+
+
+@MainActor
+final class WorkspaceRestoreOfflineCases {
+    let checks: CheckRunner
+    init(_ checks: CheckRunner) { self.checks = checks }
+    func testDefaultAndNonFloatingWindowsNeverOptIn() {
+        var state = WorkspaceMinimizedRestorePolicy()
+        state.remember(windowID: 1, pid: 101, workspace: "A", ruleID: nil, floating: true)
+        state.remember(windowID: 2, pid: 102, workspace: "A", ruleID: "precise-rule", floating: false)
+        checks.expectTrue(state.entries.isEmpty)
+        checks.expectNil(state.begin(workspace: "A", readOnly: false))
+        checks.expectTrue(WorkspaceMinimizedRestorePolicy.preserveNativeLayout(eligible: true, minimized: nil, nativeFullscreen: false))
+        checks.expectFalse(WorkspaceMinimizedRestorePolicy.preserveNativeLayout(eligible: false, minimized: nil, nativeFullscreen: false))
+        checks.expectFalse(WorkspaceMinimizedRestorePolicy.preserveNativeLayout(eligible: true, minimized: false, nativeFullscreen: false))
+        checks.expectFalse(WorkspaceMinimizedRestorePolicy.preserveNativeLayout(eligible: true, minimized: true, nativeFullscreen: false))
+        checks.expectFalse(WorkspaceMinimizedRestorePolicy.preserveNativeLayout(eligible: true, minimized: nil, nativeFullscreen: true))
+    }
+
+    func testOnlyExplicitSelectionStartsRestoreAndPreservesOrigin() throws {
+        var state = WorkspaceMinimizedRestorePolicy()
+        state.noteFocused(1)
+        state.remember(windowID: 1, pid: 101, workspace: "Origin", ruleID: "precise-rule", floating: true)
+        checks.expectNil(state.request)
+        checks.expectEqual(state.entries[1]?.workspace, "Origin")
+        checks.expectNil(state.begin(workspace: "Other", readOnly: false))
+        let request = try checks.require(state.begin(workspace: "Origin", readOnly: false))
+        checks.expectEqual(request.entry.workspace, "Origin")
+        checks.expectEqual(request.entry.ruleID, "precise-rule")
+        checks.expectTrue(state.isCurrent(request, workspace: "Origin"))
+        checks.expectFalse(state.isCurrent(request, workspace: "Other"))
+    }
+
+    func testMostRecentEligibleWindowWinsWithinRequestedWorkspace() throws {
+        var state = WorkspaceMinimizedRestorePolicy()
+        state.noteFocused(2)
+        state.noteFocused(1)
+        state.remember(windowID: 1, pid: 101, workspace: "A", ruleID: "one", floating: true)
+        state.remember(windowID: 2, pid: 102, workspace: "A", ruleID: "two", floating: true)
+        state.noteFocused(3)
+        state.remember(windowID: 3, pid: 103, workspace: "B", ruleID: "three", floating: true)
+        let request = try checks.require(state.begin(workspace: "A", readOnly: false))
+        checks.expectEqual(request.entry.windowID, 1)
+        checks.expectEqual(state.entries.count, 3)
+    }
+
+    func testReadOnlySelectionDoesNotStartOrCancelARequest() throws {
+        var state = WorkspaceMinimizedRestorePolicy()
+        state.remember(windowID: 1, pid: 101, workspace: "A", ruleID: "one", floating: true)
+        checks.expectNil(state.begin(workspace: "A", readOnly: true))
+        checks.expectNil(state.request)
+        let request = try checks.require(state.begin(workspace: "A", readOnly: false))
+        checks.expectNil(state.begin(workspace: "B", readOnly: true))
+        checks.expectEqual(state.request, request)
+    }
+
+    func testSameWorkspaceRetryIsExplicitAndSuccessIsNotRepeated() throws {
+        var state = WorkspaceMinimizedRestorePolicy()
+        state.remember(windowID: 1, pid: 101, workspace: "A", ruleID: "one", floating: true)
+        let first = try checks.require(state.begin(workspace: "A", readOnly: false))
+        state.finish(first, outcome: .timeout)
+        checks.expectNil(state.request)
+        checks.expectEqual(state.entries[1]?.minimized, true)
+        checks.expectEqual(state.outcomes[1], .timeout)
+        let retry = try checks.require(state.begin(workspace: "A", readOnly: false))
+        checks.expectFalse(state.isCurrent(first, workspace: "A"))
+        checks.expectTrue(state.isCurrent(retry, workspace: "A"))
+        state.finish(retry, outcome: .success)
+        checks.expectEqual(state.entries[1]?.workspace, "A")
+        checks.expectEqual(state.entries[1]?.minimized, false)
+        checks.expectNil(state.begin(workspace: "A", readOnly: false))
+        state.remember(windowID: 1, pid: 101, workspace: "A", ruleID: "one", floating: true)
+        checks.expectNotNil(state.begin(workspace: "A", readOnly: false))
+    }
+
+    func testLatestRequestCancelsOldAndStaleCompletionCannotWin() throws {
+        var state = WorkspaceMinimizedRestorePolicy()
+        state.remember(windowID: 1, pid: 101, workspace: "A", ruleID: "one", floating: true)
+        state.remember(windowID: 2, pid: 102, workspace: "B", ruleID: "two", floating: true)
+        let old = try checks.require(state.begin(workspace: "A", readOnly: false))
+        let latest = try checks.require(state.begin(workspace: "B", readOnly: false))
+        checks.expectFalse(state.isCurrent(old, workspace: "A"))
+        checks.expectEqual(state.outcomes[1], .cancelled)
+        state.finish(old, outcome: .success)
+        checks.expectEqual(state.request, latest)
+        checks.expectEqual(state.entries[1]?.minimized, true)
+        state.cancel()
+        checks.expectFalse(state.isCurrent(latest, workspace: "B"))
+        checks.expectEqual(state.outcomes[2], .cancelled)
+    }
+
+    func testFailedIdentityRetainsMinimizedOriginAndNoAutomaticRetry() throws {
+        var state = WorkspaceMinimizedRestorePolicy()
+        state.remember(windowID: 1, pid: 101, workspace: "Origin", ruleID: "one", floating: true)
+        let request = try checks.require(state.begin(workspace: "Origin", readOnly: false))
+        state.finish(request, outcome: .identityMismatch)
+        checks.expectEqual(state.entries[1]?.minimized, true)
+        checks.expectEqual(state.entries[1]?.workspace, "Origin")
+        checks.expectEqual(state.outcomes[1], .identityMismatch)
+        checks.expectNil(state.request)
+    }
+
+    func testDestroyedOrReusedWindowInvalidatesRequest() throws {
+        var state = WorkspaceMinimizedRestorePolicy()
+        state.remember(windowID: 1, pid: 101, workspace: "A", ruleID: "one", floating: true)
+        let request = try checks.require(state.begin(workspace: "A", readOnly: false))
+        state.forget(1)
+        checks.expectNil(state.request)
+        checks.expectNil(state.entries[1])
+        state.remember(windowID: 1, pid: 999, workspace: "A", ruleID: "new-process", floating: true)
+        checks.expectFalse(state.isCurrent(request, workspace: "A"))
+        let new = try checks.require(state.begin(workspace: "A", readOnly: false))
+        checks.expectEqual(new.entry.pid, 999)
+        checks.expectEqual(new.entry.ruleID, "new-process")
+    }
+
+    func testExternalRestoreSkipsRecentWindowWithoutInventingSuccess() throws {
+        var state = WorkspaceMinimizedRestorePolicy()
+        state.noteFocused(1)
+        state.noteFocused(2)
+        state.remember(windowID: 1, pid: 101, workspace: "A", ruleID: "one", floating: true)
+        state.remember(windowID: 2, pid: 102, workspace: "A", ruleID: "two", floating: true)
+        state.noteNotMinimized(2)
+        checks.expectNil(state.outcomes[2])
+        let older = try checks.require(state.begin(workspace: "A", readOnly: false))
+        checks.expectEqual(older.entry.windowID, 1)
+        state.finish(older, outcome: .timeout)
+        state.remember(windowID: 2, pid: 102, workspace: "A", ruleID: "two", floating: true)
+        let minimizedAgain = try checks.require(state.begin(workspace: "A", readOnly: false))
+        checks.expectEqual(minimizedAgain.entry.windowID, 2)
+        checks.expectEqual(state.entries[2]?.workspace, "A")
+    }
 }
 
 
@@ -650,6 +875,7 @@ let checks = CheckRunner()
 let engineCases = CompatibilityOfflineCases(checks)
 let configCases = CompatibilityConfigOfflineCases(checks)
 let reloadCases = CompatibilityReloadOfflineCases(checks)
+let restoreCases = WorkspaceRestoreOfflineCases(checks)
 checks.run("testNativePositivePIDBypassesRecoveryAndNoRulesRejectInvalidPID") { engineCases.testNativePositivePIDBypassesRecoveryAndNoRulesRejectInvalidPID() }
 checks.run("testPIDRecoveryUsesExactConfiguredIdentityAndUniqueOwner") { engineCases.testPIDRecoveryUsesExactConfiguredIdentityAndUniqueOwner() }
 checks.run("testRecoveryNeverBroadensMissingOrMismatchedMetadata") { engineCases.testRecoveryNeverBroadensMissingOrMismatchedMetadata() }
@@ -665,6 +891,9 @@ checks.run("testMalformedWindowRulesFallBackToDefaultHeuristics") { engineCases.
 checks.run("testArgumentParserStopsBeforeEnvironmentAndRejectsTruncation") { engineCases.testArgumentParserStopsBeforeEnvironmentAndRejectsTruncation() }
 checks.run("testFilesystemIdentityIgnoresDirectoryURLHintAndTrailingSlash") { engineCases.testFilesystemIdentityIgnoresDirectoryURLHintAndTrailingSlash() }
 checks.run("testValidRuleTypesAndExactValues") { configCases.testValidRuleTypesAndExactValues() }
+checks.run("testWorkspaceFocusMinimizedRestoreIsOptInAndKeepsExactMatch") { configCases.testWorkspaceFocusMinimizedRestoreIsOptInAndKeepsExactMatch() }
+checks.run("testMinimizedRestoreRejectsUnknownValuesTypesAndMissingClassification") { configCases.testMinimizedRestoreRejectsUnknownValuesTypesAndMissingClassification() }
+checks.run("testMinimizedRestoreCannotBypassWindowIdentityRequirements") { configCases.testMinimizedRestoreCannotBypassWindowIdentityRequirements() }
 checks.run("testOptionalWindowFieldsAndEmptyRuleList") { configCases.testOptionalWindowFieldsAndEmptyRuleList() }
 checks.run("testHomePathsExpandButOtherRelativePathsAreRejected") { configCases.testHomePathsExpandButOtherRelativePathsAreRejected() }
 checks.run("testRejectsUnknownKeysAtEveryRuleTable") { configCases.testRejectsUnknownKeysAtEveryRuleTable() }
@@ -672,6 +901,17 @@ checks.run("testApplicationIdentityAndPhaseAreStrict") { configCases.testApplica
 checks.run("testWindowMatchAndActionsAreStrict") { configCases.testWindowMatchAndActionsAreStrict() }
 checks.run("testRuntimeRuleChangeRequiresRestartButOrdinaryReloadIsAllowed") { reloadCases.testRuntimeRuleChangeRequiresRestartButOrdinaryReloadIsAllowed() }
 checks.run("testInvalidCandidateAndWarningsCannotPublishPartialConfig") { reloadCases.testInvalidCandidateAndWarningsCannotPublishPartialConfig() }
+checks.run("testMinimizedRestoreChangeRequiresRestartAndLeavesOrdinaryReloadAvailable") { reloadCases.testMinimizedRestoreChangeRequiresRestartAndLeavesOrdinaryReloadAvailable() }
+checks.run("testInvalidMinimizedRestoreCannotPublishPartialConfigOrMaskItsError") { reloadCases.testInvalidMinimizedRestoreCannotPublishPartialConfigOrMaskItsError() }
+checks.run("testDefaultAndNonFloatingWindowsNeverOptIn") { restoreCases.testDefaultAndNonFloatingWindowsNeverOptIn() }
+checks.run("testOnlyExplicitSelectionStartsRestoreAndPreservesOrigin") { try restoreCases.testOnlyExplicitSelectionStartsRestoreAndPreservesOrigin() }
+checks.run("testMostRecentEligibleWindowWinsWithinRequestedWorkspace") { try restoreCases.testMostRecentEligibleWindowWinsWithinRequestedWorkspace() }
+checks.run("testReadOnlySelectionDoesNotStartOrCancelARequest") { try restoreCases.testReadOnlySelectionDoesNotStartOrCancelARequest() }
+checks.run("testSameWorkspaceRetryIsExplicitAndSuccessIsNotRepeated") { try restoreCases.testSameWorkspaceRetryIsExplicitAndSuccessIsNotRepeated() }
+checks.run("testLatestRequestCancelsOldAndStaleCompletionCannotWin") { try restoreCases.testLatestRequestCancelsOldAndStaleCompletionCannotWin() }
+checks.run("testFailedIdentityRetainsMinimizedOriginAndNoAutomaticRetry") { try restoreCases.testFailedIdentityRetainsMinimizedOriginAndNoAutomaticRetry() }
+checks.run("testDestroyedOrReusedWindowInvalidatesRequest") { try restoreCases.testDestroyedOrReusedWindowInvalidatesRequest() }
+checks.run("testExternalRestoreSkipsRecentWindowWithoutInventingSuccess") { try restoreCases.testExternalRestoreSkipsRecentWindowWithoutInventingSuccess() }
 let repoRoot = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
 checks.run("upstream axDumps corpus") { try checkUpstreamAxDumps(repoRoot.appending(path: "axDumps"), checks) }
 print("Offline checks: \(checks.groups) groups, \(checks.assertions) assertions, \(checks.fixtures) upstream fixtures, \(checks.failures) failures")

@@ -6,6 +6,6 @@ struct WorkspaceBackAndForthCommand: Command {
     /*conforms*/ let shouldResetClosedWindowsCache = false
 
     func run(_ env: CmdEnv, _ io: CmdIo) -> BinaryExitCode {
-        return .from(bool: prevFocusedWorkspace?.focusWorkspace() != nil)
+        return .from(bool: prevFocusedWorkspace?.focusWorkspace(restoreMinimized: true) != nil)
     }
 }

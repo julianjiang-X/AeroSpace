@@ -7,6 +7,7 @@ struct CompatibilityRule: Sendable, Equatable {
     enum ActivationPolicy: String, Sendable { case regular }
     enum PIDRecovery: String, Sendable { case windowOwner = "window-owner" }
     enum Classification: String, Sendable { case floating }
+    enum MinimizedRestore: String, Sendable { case onWorkspaceFocus = "on-workspace-focus" }
 
     struct Match: Sendable, Equatable {
         var appId: String? = nil
@@ -26,6 +27,9 @@ struct CompatibilityRule: Sendable, Equatable {
     struct Action: Sendable, Equatable {
         var recoverPid: PIDRecovery? = nil
         var classify: Classification? = nil
+        /// Opt-in recovery when the matching window's workspace is focused.
+        /// Unspecified rules preserve native/user minimization behavior.
+        var restoreMinimized: MinimizedRestore? = nil
     }
 
     let id: String

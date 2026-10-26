@@ -55,4 +55,35 @@ final class CompatibilityRulesReloadTest: XCTestCase {
         XCTAssertTrue(configReloadErrors(warning, currentRules: [], rulesLocked: true, warningsAsErrors: false).isEmpty)
         XCTAssertFalse(configReloadErrors(warning, currentRules: [], rulesLocked: true, warningsAsErrors: true).isEmpty)
     }
+
+    func testMinimizedRestoreChangeRequiresRestartAndLeavesOrdinaryReloadAvailable() {
+        let oldRules = parse(windowRule)
+        let restoringRule = windowRule.replacingOccurrences(
+            of: "classify = 'floating'",
+            with: "classify = 'floating', restore-minimized = 'on-workspace-focus'",
+        )
+        let restoring = parse(restoringRule)
+        XCTAssertTrue(restoring.errors.isEmpty)
+        for (current, candidate) in [(oldRules, restoring), (restoring, oldRules)] {
+            let errors = configReloadErrors(candidate, currentRules: current.config.compatibilityRules, rulesLocked: true, warningsAsErrors: false)
+            XCTAssertEqual(errors.count, 1)
+            XCTAssertTrue(errors.first?.message.contains("requires an AeroSpace restart") == true)
+            XCTAssertTrue(errors.first?.preventConfigReload == true)
+        }
+        let changedLayout = parse("accordion-padding = 44\n" + restoringRule)
+        XCTAssertTrue(configReloadErrors(changedLayout, currentRules: restoring.config.compatibilityRules, rulesLocked: true, warningsAsErrors: false).isEmpty)
+        XCTAssertTrue(configReloadErrors(restoring, currentRules: oldRules.config.compatibilityRules, rulesLocked: false, warningsAsErrors: false).isEmpty)
+    }
+
+    func testInvalidMinimizedRestoreCannotPublishPartialConfigOrMaskItsError() {
+        let current = parse(windowRule)
+        let invalid = parse("accordion-padding = 44\n" + windowRule.replacingOccurrences(
+            of: "classify = 'floating'",
+            with: "classify = 'floating', restore-minimized = true",
+        ))
+        XCTAssertFalse(invalid.errors.isEmpty)
+        let errors = configReloadErrors(invalid, currentRules: current.config.compatibilityRules, rulesLocked: true, warningsAsErrors: false)
+        XCTAssertEqual(errors, invalid.errors)
+        XCTAssertFalse(errors.contains { $0.message.contains("requires an AeroSpace restart") })
+    }
 }

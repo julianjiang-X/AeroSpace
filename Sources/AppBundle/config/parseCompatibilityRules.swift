@@ -87,8 +87,8 @@ private func parseCompatibilityAction(_ raw: OrderedJson?, _ phase: Compatibilit
     }
     let keys: Set<String> = switch phase {
         case .application: ["recover-pid"]
-        case .window: ["classify"]
-        case nil: ["recover-pid", "classify"]
+        case .window: ["classify", "restore-minimized"]
+        case nil: ["recover-pid", "classify", "restore-minimized"]
     }
     guard let table = compatibilityTable(raw, keys: keys, path, &errors) else { return nil }
     var action = CompatibilityRule.Action()
@@ -97,6 +97,7 @@ private func parseCompatibilityAction(_ raw: OrderedJson?, _ phase: Compatibilit
     }
     if phase != .application {
         action.classify = compatibilityEnum(table, "classify", path, &errors, required: phase == .window, values: ["floating"])
+        action.restoreMinimized = compatibilityEnum(table, "restore-minimized", path, &errors, values: ["on-workspace-focus"])
     }
     return action
 }

@@ -36,6 +36,7 @@ final class CompatibilityRulesConfigTest: XCTestCase {
         XCTAssertEqual(app.match.executablePath, "/Applications/Launcher.app/Contents/MacOS/Launcher")
         XCTAssertEqual(app.action.recoverPid, .windowOwner)
         XCTAssertNil(app.action.classify)
+        XCTAssertNil(app.action.restoreMinimized)
         let window = result.config.compatibilityRules[1]
         XCTAssertEqual(window.phase, .window)
         XCTAssertEqual(window.match.firstExeArgument, ["Game.exe"])
@@ -49,6 +50,66 @@ final class CompatibilityRulesConfigTest: XCTestCase {
         XCTAssertEqual(window.match.minSize, [640.0, 360.0])
         XCTAssertEqual(window.action.classify, .floating)
         XCTAssertNil(window.action.recoverPid)
+        XCTAssertNil(window.action.restoreMinimized)
+    }
+
+    func testWorkspaceFocusMinimizedRestoreIsOptInAndKeepsExactMatch() {
+        let oldRules = parse(appRule + "\n" + windowRule)
+        let restoringWindowRule = windowRule.replacingOccurrences(
+            of: "classify = 'floating'",
+            with: "classify = 'floating', restore-minimized = 'on-workspace-focus'",
+        )
+        let result = parse(appRule + "\n" + restoringWindowRule)
+        XCTAssertTrue(result.errors.isEmpty, "\(result.errors)")
+        XCTAssertEqual(result.config.compatibilityRules.count, 2)
+        guard result.config.compatibilityRules.count == 2,
+              oldRules.config.compatibilityRules.count == 2 else { return }
+        XCTAssertEqual(result.config.compatibilityRules[0], oldRules.config.compatibilityRules[0])
+        let window = result.config.compatibilityRules[1]
+        XCTAssertEqual(window.action.restoreMinimized, .onWorkspaceFocus)
+        XCTAssertEqual(window.action.classify, .floating)
+        XCTAssertNil(window.action.recoverPid)
+        XCTAssertEqual(window.match, oldRules.config.compatibilityRules[1].match)
+        XCTAssertTrue(window.isValidFloatingWindowRule)
+    }
+
+    func testMinimizedRestoreRejectsUnknownValuesTypesAndMissingClassification() {
+        for raw in ["'always'", "'on-window-focus'", "'ON-WORKSPACE-FOCUS'", "''", "' '", "true", "1", "['on-workspace-focus']", "{}"] {
+            let rules = windowRule.replacingOccurrences(
+                of: "classify = 'floating'",
+                with: "classify = 'floating', restore-minimized = \(raw)",
+            )
+            let result = parse(rules)
+            XCTAssertFalse(result.errors.isEmpty, "Accepted restore-minimized = \(raw)")
+            XCTAssertTrue(result.config.compatibilityRules.isEmpty)
+        }
+        for classification in ["", "classify = 'tiled', "] {
+            let rules = windowRule.replacingOccurrences(
+                of: "classify = 'floating'",
+                with: classification + "restore-minimized = 'on-workspace-focus'",
+            )
+            let result = parse(rules)
+            XCTAssertFalse(result.errors.isEmpty, "Accepted restore without floating classification")
+            XCTAssertTrue(result.config.compatibilityRules.isEmpty)
+        }
+        let app = parse(appRule.replacingOccurrences(
+            of: "recover-pid = 'window-owner'",
+            with: "recover-pid = 'window-owner', restore-minimized = 'on-workspace-focus'",
+        ))
+        XCTAssertTrue(app.errors.contains { $0.message == "Unknown key" }, "\(app.errors)")
+        XCTAssertTrue(app.config.compatibilityRules.isEmpty)
+    }
+
+    func testMinimizedRestoreCannotBypassWindowIdentityRequirements() {
+        let restoringRule = windowRule.replacingOccurrences(
+            of: "classify = 'floating'",
+            with: "classify = 'floating', restore-minimized = 'on-workspace-focus'",
+        )
+        for removed in ["executable-path = '/opt/game/wine', ", "window-title = ['Game'], ", "ax-role = 'AXWindow', ", "ax-subrole = 'AXUnknown', "] {
+            let result = parse(restoringRule.replacingOccurrences(of: removed, with: ""))
+            XCTAssertFalse(result.errors.isEmpty, "Accepted restore after removing \(removed)")
+            XCTAssertTrue(result.config.compatibilityRules.isEmpty)
+        }
     }
 
     func testOptionalWindowFieldsAndEmptyRuleList() {

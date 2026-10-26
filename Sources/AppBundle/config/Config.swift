@@ -33,6 +33,8 @@ var defaultConfigUrl: URL {
 @MainActor var configUrl: URL = defaultConfigUrl
 
 struct Config: ConvenienceMutable {
+    /// SHA256 of the successfully loaded source, never the raw text in diagnostics.
+    var sourceFingerprint: String = "unknown"
     var configVersion: ConfigVersion = ._1
     var _afterLoginCommand: [any Command] = []
     var afterStartupCommand: Shell<any Command> = .empty
@@ -61,6 +63,8 @@ struct Config: ConvenienceMutable {
     var modes: [String: Mode] = [:]
     var onWindowDetected: [WindowDetectedCallback] = []
     var compatibilityRules: [CompatibilityRule] = []
+    var workspaceRulesEnabled: Bool = false
+    var workspaceRules: [WorkspaceRule] = []
     var onModeChanged: Shell<any Command> = .empty
 }
 

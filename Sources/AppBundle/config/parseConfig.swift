@@ -1,5 +1,6 @@
 import AppKit
 import Common
+import CryptoKit
 import HotKey
 import TOMLDecoder
 import OrderedCollections
@@ -158,6 +159,8 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "workspace-to-monitor-force-assignment": Parser(\.workspaceToMonitorForceAssignment, parseWorkspaceToMonitorAssignment),
     "on-window-detected": Parser(\.onWindowDetected, parseOnWindowDetectedArray),
     "compatibility-rules": Parser(\.compatibilityRules, parseCompatibilityRules),
+    "workspace-rules-enabled": Parser(\.workspaceRulesEnabled, parseBool),
+    "workspace-rules": Parser(\.workspaceRules, parseWorkspaceRules),
 
     // Deprecated
     "non-empty-workspaces-root-containers-layout-on-startup": Parser(\._nonEmptyWorkspacesRootContainersLayoutOnStartup, parseStartupRootContainerLayout),
@@ -264,6 +267,7 @@ struct ParseConfigResult {
 
     var config = rawTable.parseTable(Config(), configParser, .emptyRoot, &c)
     config.configVersion = configVersion
+    config.sourceFingerprint = SHA256.hash(data: Data(rawToml.utf8)).map { ("0" + String($0, radix: 16)).suffix(2) }.joined()
 
     if let mapping = rawTable[keyMappingConfigRootKey].flatMap({ parseKeyMapping($0, .rootKey(keyMappingConfigRootKey), &c) }) {
         config.keyMapping = mapping

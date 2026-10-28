@@ -22,7 +22,7 @@ struct ListWindowsCommand: Command {
                         switch filter {
                             case .focused: [focus.workspace]
                             case .visible: Workspace.all.filter(\.isVisible)
-                            case .name(let name): [Workspace.get(byName: name.raw)]
+                            case .name(let name): workspaceCreationError(name.raw) == nil ? [Workspace.get(byName: name.raw)] : []
                         }
                     }
                     .toSet()

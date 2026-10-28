@@ -22,6 +22,7 @@ struct WorkspaceCommand: Command {
                 guard let workspace = workspace.getOrNil(appendErrorTo: &io.stderr) else { return .fail }
                 workspaceName = workspace.name
             case .direct(let name):
+                if let error = workspaceCreationError(name.raw) { return .fail(io.err(error)) }
                 workspaceName = name.raw
                 if args.autoBackAndForth && focusedWs.name == workspaceName {
                     return WorkspaceBackAndForthCommand(args: WorkspaceBackAndForthCmdArgs(rawArgs: [])).run(env, io)
@@ -45,6 +46,7 @@ struct WorkspaceCommand: Command {
             .mapAllOrFailure(WorkspaceName.parse)
             .get()
             ?? []
+        if let error = stdinWorkspaces.lazy.compactMap({ workspaceCreationError($0.raw) }).first { throw error }
         let currentMonitor = current.workspaceMonitor
         let workspaces: [Workspace] = stdin != nil
             ? stdinWorkspaces.map { Workspace.get(byName: $0.raw) }

@@ -17,6 +17,10 @@ extension CmdArgs {
                 return nil
             }
         }
+        if let workspaceName, let error = workspaceCreationError(workspaceName.raw) {
+            io.err(error)
+            return nil
+        }
         if let workspace {
             return workspace.toLiveFocus()
         }

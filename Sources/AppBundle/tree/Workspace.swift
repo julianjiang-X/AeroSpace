@@ -12,17 +12,35 @@ import Common
     getStubWorkspace(forPoint: monitor.rect.topLeftCorner)
 }
 
+/// With `workspace-creation = 'persistent-only'`, a name outside persistent-workspaces that doesn't
+/// already exist can't be created. Returns the error to report, or nil when the name is allowed.
+@MainActor func workspaceCreationError(_ name: String) -> String? {
+    guard config.workspaceCreation == .persistentOnly, !config.persistentWorkspaces.contains(name),
+          workspaceNameToWorkspace[name] == nil else { return nil }
+    return "Workspace '\(name)' is not in persistent-workspaces (workspace-creation = 'persistent-only')"
+}
+
 @MainActor
 private func getStubWorkspace(forPoint point: CGPoint) -> Workspace {
+    let persistentOnly = config.workspaceCreation == .persistentOnly
+    let allowed: (Workspace) -> Bool = { !persistentOnly || config.persistentWorkspaces.contains($0.name) }
     if let prev = screenPointToPrevVisibleWorkspace[point].map({ Workspace.get(byName: $0) }),
-       !prev.isVisible && prev.workspaceMonitor.rect.topLeftCorner == point && prev.forceAssignedMonitor == nil
+       !prev.isVisible && prev.workspaceMonitor.rect.topLeftCorner == point && prev.forceAssignedMonitor == nil && allowed(prev)
     {
         return prev
     }
     if let candidate = Workspace.all
-        .first(where: { !$0.isVisible && $0.workspaceMonitor.rect.topLeftCorner == point })
+        .first(where: { !$0.isVisible && $0.workspaceMonitor.rect.topLeftCorner == point && allowed($0) })
     {
         return candidate
+    }
+    if persistentOnly {
+        // Any invisible persistent workspace this monitor may show, empty ones first
+        let usable = config.persistentWorkspaces.map { Workspace.get(byName: $0) }
+            .filter { !$0.isVisible && isValidAssignment(workspace: $0, screen: point) }
+        if let stub = usable.first(where: \.isEffectivelyEmpty) ?? usable.first { return stub }
+        // Every persistent workspace is visible or pinned elsewhere: there are more monitors than
+        // workspaces to show, so creating one below is the only way to fill this screen
     }
     return (1 ... Int.max).lazy
         .map { Workspace.get(byName: String($0)) }

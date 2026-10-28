@@ -64,7 +64,7 @@ struct FrozenWorkspace: Sendable {
         let monitors = monitors
         let topLeftCornerToMonitor = monitors.grouped { $0.rect.topLeftCorner }
 
-        for frozenWorkspace in closedWindowsCache.workspaces {
+        for frozenWorkspace in closedWindowsCache.workspaces where workspaceCreationError(frozenWorkspace.name) == nil {
             let workspace = Workspace.get(byName: frozenWorkspace.name)
             _ = topLeftCornerToMonitor[frozenWorkspace.monitor.topLeftCorner]?
                 .singleOrNil()?
@@ -84,7 +84,7 @@ struct FrozenWorkspace: Sendable {
             }
         }
 
-        for monitor in closedWindowsCache.monitors {
+        for monitor in closedWindowsCache.monitors where workspaceCreationError(monitor.visibleWorkspace) == nil {
             _ = topLeftCornerToMonitor[monitor.topLeftCorner]?
                 .singleOrNil()?
                 .setActiveWorkspace(Workspace.get(byName: monitor.visibleWorkspace))

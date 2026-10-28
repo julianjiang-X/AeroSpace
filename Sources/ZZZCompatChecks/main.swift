@@ -1018,6 +1018,45 @@ final class FocusRulesConfigOfflineCases {
 
 
 @MainActor
+final class WorkspaceCreationConfigOfflineCases {
+    let checks: CheckRunner
+    init(_ checks: CheckRunner) { self.checks = checks }
+    private func parse(_ raw: String) -> ParseConfigResult {
+        parseConfig("config-version = 2\n" + raw)
+    }
+
+    func testSettingDefaultsToAutoAndAcceptsPersistentOnly() {
+        let none = parse("")
+        checks.expectTrue(none.errors.isEmpty)
+        checks.expectEqual(none.config.workspaceCreation, .auto)
+        let strict = parse("persistent-workspaces = ['1', 'Mail']\nworkspace-creation = 'persistent-only'")
+        checks.expectTrue(strict.errors.isEmpty, "\(strict.errors)")
+        checks.expectEqual(strict.config.workspaceCreation, .persistentOnly)
+        checks.expectEqual(parse("workspace-creation = 'auto'").config.workspaceCreation, .auto)
+        for invalid in ["workspace-creation = 'never'", "workspace-creation = true"] {
+            checks.expectFalse(parse(invalid).errors.isEmpty, "Accepted \(invalid)")
+        }
+    }
+
+    func testOnlyPersistentOrExistingNamesPassInPersistentOnlyMode() {
+        let saved = config
+        defer { config = saved }
+        config.persistentWorkspaces = ["1", "Mail"]
+
+        config.workspaceCreation = .auto
+        checks.expectNil(workspaceCreationError("zz-unlisted-workspace"))
+
+        config.workspaceCreation = .persistentOnly
+        checks.expectNil(workspaceCreationError("1"))
+        checks.expectNil(workspaceCreationError("Mail"))
+        checks.expectNotNil(workspaceCreationError("zz-unlisted-workspace"))
+        checks.expectNotNil(workspaceCreationError("6"))
+        checks.expectNotNil(workspaceCreationError("mail"), "Names are exact")
+    }
+}
+
+
+@MainActor
 final class WorkspaceRuleEngineOfflineCases {
     let checks: CheckRunner
     init(_ checks: CheckRunner) { self.checks = checks }
@@ -1629,6 +1668,7 @@ let reloadCases = CompatibilityReloadOfflineCases(checks)
 let restoreCases = WorkspaceRestoreOfflineCases(checks)
 let workspaceConfigCases = WorkspaceRulesConfigOfflineCases(checks)
 let focusConfigCases = FocusRulesConfigOfflineCases(checks)
+let workspaceCreationCases = WorkspaceCreationConfigOfflineCases(checks)
 let workspaceEngineCases = WorkspaceRuleEngineOfflineCases(checks)
 let workspacePolicyCases = WorkspaceAffinityPolicyOfflineCases(checks)
 let workspaceRuntimeCases = WorkspaceAffinityRuntimeOfflineCases(checks)
@@ -1679,6 +1719,8 @@ checks.run("testWorkspaceRuleUpdatesDoNotAcquireCompatibilityRestartLock") { wor
 checks.run("testRulesAreOptionalAndParsedInOrder") { focusConfigCases.testRulesAreOptionalAndParsedInOrder() }
 checks.run("testRequiredFieldsAreStrict") { focusConfigCases.testRequiredFieldsAreStrict() }
 checks.run("testInvalidValuesRejectTheRule") { focusConfigCases.testInvalidValuesRejectTheRule() }
+checks.run("testSettingDefaultsToAutoAndAcceptsPersistentOnly") { workspaceCreationCases.testSettingDefaultsToAutoAndAcceptsPersistentOnly() }
+checks.run("testOnlyPersistentOrExistingNamesPassInPersistentOnlyMode") { workspaceCreationCases.testOnlyPersistentOrExistingNamesPassInPersistentOnlyMode() }
 checks.run("testExactAppIDAndFirstMatchingRuleWin") { workspaceEngineCases.testExactAppIDAndFirstMatchingRuleWin() }
 checks.run("testGuestIdentityIsExactAndCaseInsensitiveWithoutMatchingOtherGuests") { workspaceEngineCases.testGuestIdentityIsExactAndCaseInsensitiveWithoutMatchingOtherGuests() }
 checks.run("testBundlePathAndMissingFieldsDoNotBroadenIdentity") { workspaceEngineCases.testBundlePathAndMissingFieldsDoNotBroadenIdentity() }

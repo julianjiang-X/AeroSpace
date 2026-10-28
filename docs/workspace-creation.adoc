@@ -1,0 +1,25 @@
+= Persistent-only workspaces (local compatibility build)
+
+Upstream AeroSpace creates a workspace whenever something names one that doesn't exist,
+and invents a numbered workspace (`6`, `7`, ...) when a monitor has none it may show.
+Scripts and key mappings that assume a fixed workspace list break when that happens.
+
+[source,toml]
+----
+persistent-workspaces = ['1', '2', '3', '4', '5', 'Mail']
+workspace-creation = 'persistent-only'   # default: 'auto' (upstream behavior)
+----
+
+With `persistent-only`:
+
+* `workspace`, `move-node-to-workspace`, `summon-workspace`, `--workspace` targets and
+  `workspace-rules` destinations refuse a name outside `persistent-workspaces` that doesn't
+  already exist, instead of creating it. `list-windows --workspace <name>` lists nothing.
+* A monitor that needs a workspace (startup, monitor attached, its workspace moved away) gets a
+  persistent one: first one it showed before or that is assigned to it, then any invisible
+  persistent workspace it may show under `workspace-to-monitor-force-assignment`, empty ones first.
+* Closed-window recovery skips workspaces that no longer exist and aren't persistent.
+
+A new workspace is still created in one case: every persistent workspace is visible or pinned
+to another monitor, so a monitor would otherwise have nothing to show. Give each monitor at least
+one workspace it may show (for example `5 = ['Built-in.*', 'main']`) and this never happens.

@@ -49,6 +49,7 @@ struct Config: ConvenienceMutable {
     var accordionPadding: Int = 30
     var enableNormalizationOppositeOrientationForNestedContainers: Bool = true
     var persistentWorkspaces: OrderedSet<String> = []
+    var workspaceCreation: WorkspaceCreation = .auto
     var execOnWorkspaceChange: [String] = [] // todo deprecate
     var keyMapping = KeyMapping()
     var execConfig: ExecConfig = ExecConfig()
@@ -67,6 +68,13 @@ struct Config: ConvenienceMutable {
     var workspaceRules: [WorkspaceRule] = []
     var focusRules: [FocusRule] = []
     var onModeChanged: Shell<any Command> = .empty
+}
+
+enum WorkspaceCreation: String {
+    /// Upstream behavior: any command or monitor may create a workspace by name
+    case auto
+    /// Only names in persistent-workspaces ever exist (see workspaceCreationError, getStubWorkspace)
+    case persistentOnly = "persistent-only"
 }
 
 struct FocusFollowsMouse: ConvenienceMutable {

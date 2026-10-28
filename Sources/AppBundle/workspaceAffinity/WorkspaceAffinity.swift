@@ -258,6 +258,10 @@ enum WorkspaceAffinity {
                 stability.forget(windowID: id)
                 continue
             }
+            if workspaceCreationError(rule.workspace) != nil {
+                setState(window, rule: rule, result: "blocked-workspace-not-persistent")
+                continue
+            }
             guard budget.allowAndRecord(windowID: id, now: ProcessInfo.processInfo.systemUptime) else {
                 setState(window, rule: rule, result: "paused-conflict-budget")
                 continue

@@ -162,6 +162,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "workspace-rules-enabled": Parser(\.workspaceRulesEnabled, parseBool),
     "workspace-rules": Parser(\.workspaceRules, parseWorkspaceRules),
     "focus-rules": Parser(\.focusRules, parseFocusRules),
+    "workspace-creation": Parser(\.workspaceCreation, parseWorkspaceCreation),
 
     // Deprecated
     "non-empty-workspaces-root-containers-layout-on-startup": Parser(\._nonEmptyWorkspacesRootContainersLayoutOnStartup, parseStartupRootContainerLayout),
@@ -415,6 +416,12 @@ private func parseArrayOfStrings(_ raw: OrderedJson, _ backtrace: ConfigBacktrac
                 parseString(elem, backtrace + .index(index))
             }
         }
+}
+
+private func parseWorkspaceCreation(_ raw: OrderedJson, _ backtrace: ConfigBacktrace) -> ResOrConfigParseDiagnostic<WorkspaceCreation> {
+    parseString(raw, backtrace).flatMap {
+        WorkspaceCreation(rawValue: $0).toResult(.init(backtrace, "Expected one of: auto, persistent-only"))
+    }
 }
 
 private func parseDefaultContainerOrientation(_ raw: OrderedJson, _ backtrace: ConfigBacktrace) -> ResOrConfigParseDiagnostic<DefaultContainerOrientation> {

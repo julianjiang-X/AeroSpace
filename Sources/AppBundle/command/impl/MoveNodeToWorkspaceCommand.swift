@@ -22,6 +22,7 @@ struct MoveNodeToWorkspaceCommand: Command {
                 guard let ws = ws.getOrNil(appendErrorTo: &io.stderr) else { return .fail }
                 targetWorkspace = ws
             case .direct(let name):
+                if let error = workspaceCreationError(name.raw) { return .fail(io.err(error)) }
                 targetWorkspace = Workspace.get(byName: name.raw)
         }
         return moveWindowToWorkspace(window, targetWorkspace, io, focusFollowsWindow: args.focusFollowsWindow, failIfNoop: args.failIfNoop)

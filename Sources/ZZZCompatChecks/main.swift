@@ -948,6 +948,76 @@ final class WorkspaceRulesConfigOfflineCases {
 
 
 @MainActor
+final class FocusRulesConfigOfflineCases {
+    let checks: CheckRunner
+    init(_ checks: CheckRunner) { self.checks = checks }
+    private let testHostRule = """
+    [[focus-rules]]
+    id = 'test-host'
+    if.app-name-regex-substring = '^dmhost$'
+    policy = 'ignore-activation'
+    """
+
+    private func parse(_ raw: String) -> ParseConfigResult {
+        parseConfig("config-version = 2\n" + raw)
+    }
+
+    func testRulesAreOptionalAndParsedInOrder() {
+        let none = parse("")
+        checks.expectTrue(none.errors.isEmpty)
+        checks.expectTrue(none.config.focusRules.isEmpty)
+        checks.expectTrue(parse("focus-rules = []").errors.isEmpty)
+
+        let result = parse(testHostRule + """
+
+            [[focus-rules]]
+            id = 'parked'
+            if = { app-id = 'example.app', window-title-regex-substring = 'Preview', workspace = 'Emu' }
+            policy = 'ignore-activation'
+            """)
+        checks.expectTrue(result.errors.isEmpty, "\(result.errors)")
+        checks.expectEqual(result.config.focusRules.map(\.id), ["test-host", "parked"])
+        guard result.config.focusRules.count == 2 else { return }
+        let host = result.config.focusRules[0]
+        checks.expectEqual(host.policy, .ignoreActivation)
+        checks.expectEqual(host.matcher.appNameRegexSubstring?.origin, "^dmhost$")
+        checks.expectNil(host.matcher.appId)
+        let parked = result.config.focusRules[1]
+        checks.expectEqual(parked.matcher.appId, "example.app")
+        checks.expectEqual(parked.matcher.windowTitleRegexSubstring?.origin, "Preview")
+        checks.expectEqual(parked.matcher.workspace, "Emu")
+    }
+
+    func testRequiredFieldsAreStrict() {
+        for field in ["id = 'test-host'\n", "if.app-name-regex-substring = '^dmhost$'\n", "policy = 'ignore-activation'"] {
+            let result = parse(testHostRule.replacingOccurrences(of: field, with: ""))
+            checks.expectFalse(result.errors.isEmpty, "Accepted missing \(field)")
+            checks.expectTrue(result.config.focusRules.isEmpty)
+        }
+        checks.expectFalse(parse(testHostRule.replacingOccurrences(of: "id = 'test-host'", with: "id = ' '")).errors.isEmpty)
+        checks.expectFalse(parse(testHostRule + "\n" + testHostRule).errors.isEmpty)
+    }
+
+    func testInvalidValuesRejectTheRule() {
+        let invalid = [
+            testHostRule.replacingOccurrences(of: "'ignore-activation'", with: "'follow'"),
+            testHostRule + "\nworkspace = 'Emu'",
+            testHostRule.replacingOccurrences(of: "if.app-name-regex-substring", with: "if.app-name"),
+            testHostRule.replacingOccurrences(of: "if.app-name-regex-substring = '^dmhost$'", with: "if = {}"),
+            testHostRule.replacingOccurrences(of: "if.app-name-regex-substring = '^dmhost$'", with: "if = 'true'"),
+            testHostRule + "\nif.during-aerospace-startup = false",
+            "focus-rules = 'test-host'",
+        ]
+        for raw in invalid {
+            let result = parse(raw)
+            checks.expectFalse(result.errors.isEmpty, "Accepted \(raw)")
+            checks.expectTrue(result.config.focusRules.isEmpty)
+        }
+    }
+}
+
+
+@MainActor
 final class WorkspaceRuleEngineOfflineCases {
     let checks: CheckRunner
     init(_ checks: CheckRunner) { self.checks = checks }
@@ -1558,6 +1628,7 @@ let configCases = CompatibilityConfigOfflineCases(checks)
 let reloadCases = CompatibilityReloadOfflineCases(checks)
 let restoreCases = WorkspaceRestoreOfflineCases(checks)
 let workspaceConfigCases = WorkspaceRulesConfigOfflineCases(checks)
+let focusConfigCases = FocusRulesConfigOfflineCases(checks)
 let workspaceEngineCases = WorkspaceRuleEngineOfflineCases(checks)
 let workspacePolicyCases = WorkspaceAffinityPolicyOfflineCases(checks)
 let workspaceRuntimeCases = WorkspaceAffinityRuntimeOfflineCases(checks)
@@ -1605,6 +1676,9 @@ checks.run("testUnknownKeysTypesAndPoliciesAreRejected") { workspaceConfigCases.
 checks.run("testOnlyExactIdentityAnchorsAreAccepted") { workspaceConfigCases.testOnlyExactIdentityAnchorsAreAccepted() }
 checks.run("testWorkspaceAndOptionalMatchFieldsAreStrict") { workspaceConfigCases.testWorkspaceAndOptionalMatchFieldsAreStrict() }
 checks.run("testWorkspaceRuleUpdatesDoNotAcquireCompatibilityRestartLock") { workspaceConfigCases.testWorkspaceRuleUpdatesDoNotAcquireCompatibilityRestartLock() }
+checks.run("testRulesAreOptionalAndParsedInOrder") { focusConfigCases.testRulesAreOptionalAndParsedInOrder() }
+checks.run("testRequiredFieldsAreStrict") { focusConfigCases.testRequiredFieldsAreStrict() }
+checks.run("testInvalidValuesRejectTheRule") { focusConfigCases.testInvalidValuesRejectTheRule() }
 checks.run("testExactAppIDAndFirstMatchingRuleWin") { workspaceEngineCases.testExactAppIDAndFirstMatchingRuleWin() }
 checks.run("testGuestIdentityIsExactAndCaseInsensitiveWithoutMatchingOtherGuests") { workspaceEngineCases.testGuestIdentityIsExactAndCaseInsensitiveWithoutMatchingOtherGuests() }
 checks.run("testBundlePathAndMissingFieldsDoNotBroadenIdentity") { workspaceEngineCases.testBundlePathAndMissingFieldsDoNotBroadenIdentity() }

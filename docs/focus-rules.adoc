@@ -1,0 +1,43 @@
+= Focus rules (local compatibility build)
+
+Some apps focus their own windows: a test host that relaunches, a game, a launcher.
+When such a window lives on another workspace, AeroSpace normally follows macOS focus
+and switches to that workspace. A focus rule tells AeroSpace to stay where it is.
+
+== Configuration
+
+[source,toml]
+----
+[[on-window-detected]]
+    if.app-name-regex-substring = '^dmhost$'
+    run = 'move-node-to-workspace Emu'
+
+[[focus-rules]]
+id = 'test-host'
+if.app-name-regex-substring = '^dmhost$'
+policy = 'ignore-activation'
+----
+
+`if` takes the same table keys as `on-window-detected`: `app-id`,
+`app-name-regex-substring`, `window-title-regex-substring` and `workspace`.
+At least one is required; `during-aerospace-startup` and the command form of `if`
+are not accepted. `id` must be unique. The first matching rule wins.
+Invalid rules are rejected and the last valid configuration stays loaded.
+
+== Behavior
+
+`ignore-activation`:: When macOS focuses a matching window that is on a workspace
+other than the focused one, AeroSpace keeps its focused workspace and window and
+gives native focus back to that window. The matching window stays where it is.
+
+The rule applies to every native focus change: an app activating itself, Cmd-Tab,
+a Dock click, opening the app again from a launcher. AeroSpace's own commands are
+not affected. To reach a matching window, switch to its workspace
+(`aerospace workspace Emu`) or use `focus --window-id`; once it is on the focused
+workspace, native focus is followed normally.
+
+If the focused workspace has no window, there is nothing to hand focus back to:
+the workspace still doesn't change, but keyboard input goes to the matching app
+until you focus something else.
+
+An app that re-activates itself continuously is pushed back each time.

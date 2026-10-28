@@ -280,24 +280,31 @@ extension WindowDetectedCallback {
     func matches(_ window: Window) async -> Bool {
         switch self.matcher {
             case .legacy(let matcher):
-                if let startupMatcher = matcher.duringAeroSpaceStartup, startupMatcher != isStartup {
-                    return false
-                }
-                if let regex = matcher.windowTitleRegexSubstring, (try? await window.getTitle(.nonCancellable))?.contains(caseInsensitiveRegex: regex) != true {
-                    return false
-                }
-                if let appId = matcher.appId, appId != window.app.rawAppBundleId {
-                    return false
-                }
-                if let regex = matcher.appNameRegexSubstring, !(window.app.name ?? "").contains(caseInsensitiveRegex: regex) {
-                    return false
-                }
-                if let workspace = matcher.workspace, workspace != window.nodeWorkspace?.name {
-                    return false
-                }
-                return true
+                return await matcher.matches(window)
             case .command(let command):
                 return await command.run(.defaultEnv.withWindowId(window.windowId), .emptyStdin).exitCode.rawValue == 0
         }
+    }
+}
+
+extension LegacyWindowDetectedCallbackMatcher {
+    @MainActor
+    func matches(_ window: Window) async -> Bool {
+        if let startupMatcher = duringAeroSpaceStartup, startupMatcher != isStartup {
+            return false
+        }
+        if let regex = windowTitleRegexSubstring, (try? await window.getTitle(.nonCancellable))?.contains(caseInsensitiveRegex: regex) != true {
+            return false
+        }
+        if let appId, appId != window.app.rawAppBundleId {
+            return false
+        }
+        if let regex = appNameRegexSubstring, !(window.app.name ?? "").contains(caseInsensitiveRegex: regex) {
+            return false
+        }
+        if let workspace, workspace != window.nodeWorkspace?.name {
+            return false
+        }
+        return true
     }
 }

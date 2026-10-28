@@ -40,7 +40,7 @@ func runHeavyCompleteRefreshSession(
         try await $refreshSessionEvent.withValue(event) {
             let nativeFocused = try await getNativeFocusedWindow(.cancellable)
             if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
-            updateFocusCache(nativeFocused)
+            if !(await ignoresNativeActivation(nativeFocused)) { updateFocusCache(nativeFocused) }
 
             if shouldLayoutWorkspaces && optimisticallyPreLayoutWorkspaces &&
                 WorkspaceAffinity.allowsPostObservationLayout(sessionToken, activeDepth: refreshSessionDepth, independent: false) {
@@ -103,7 +103,7 @@ func runLightSession<T>(
       try await $refreshSessionEvent.withValue(event) {
         let nativeFocused = try await getNativeFocusedWindow(.cancellable)
         if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
-        updateFocusCache(nativeFocused)
+        if !(await ignoresNativeActivation(nativeFocused)) { updateFocusCache(nativeFocused) }
         let focusBefore = focus.windowOrNil
 
         await refreshModel_nonCancellable()

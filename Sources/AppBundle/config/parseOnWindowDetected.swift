@@ -100,6 +100,11 @@ private func parseCasInsensitiveRegex(_ raw: OrderedJson, _ backtrace: ConfigBac
     parseString(raw, backtrace).flatMap { CaseInsensitiveRegex.new($0).toParsedConfig(backtrace) }
 }
 
+/// The table form of an `if` matcher, shared by on-window-detected and focus-rules
+func parseWindowMatcherTable(_ raw: OrderedJson, _ backtrace: ConfigBacktrace, _ c: inout ConfigParserContext) -> LegacyWindowDetectedCallbackMatcher {
+    parseTable(raw, LegacyWindowDetectedCallbackMatcher(), matcherParsers, backtrace, &c)
+}
+
 private func parseMatcher(_ raw: OrderedJson, _ backtrace: ConfigBacktrace, _ c: inout ConfigParserContext) -> WindowDetectedCallbackMatcher {
     switch raw {
         case .dict(let raw):

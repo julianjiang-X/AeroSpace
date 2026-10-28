@@ -65,6 +65,7 @@ struct Config: ConvenienceMutable {
     var compatibilityRules: [CompatibilityRule] = []
     var workspaceRulesEnabled: Bool = false
     var workspaceRules: [WorkspaceRule] = []
+    var focusRules: [FocusRule] = []
     var onModeChanged: Shell<any Command> = .empty
 }
 

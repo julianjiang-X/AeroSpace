@@ -17,6 +17,7 @@ case_specs = [
     ("config/CompatibilityRulesReloadTest.swift", "CompatibilityRulesReloadTest", "CompatibilityReloadOfflineCases", "reloadCases"),
     ("WorkspaceMinimizedRestorePolicyTest.swift", "WorkspaceMinimizedRestorePolicyTest", "WorkspaceRestoreOfflineCases", "restoreCases"),
     ("config/WorkspaceRulesConfigTest.swift", "WorkspaceRulesConfigTest", "WorkspaceRulesConfigOfflineCases", "workspaceConfigCases"),
+    ("config/FocusRulesConfigTest.swift", "FocusRulesConfigTest", "FocusRulesConfigOfflineCases", "focusConfigCases"),
     ("WorkspaceRuleEngineTest.swift", "WorkspaceRuleEngineTest", "WorkspaceRuleEngineOfflineCases", "workspaceEngineCases"),
     ("WorkspaceAffinityPolicyTest.swift", "WorkspaceAffinityPolicyTest", "WorkspaceAffinityPolicyOfflineCases", "workspacePolicyCases"),
     ("WorkspaceAffinityRuntimeTest.swift", "WorkspaceAffinityRuntimeTest", "WorkspaceAffinityRuntimeOfflineCases", "workspaceRuntimeCases"),

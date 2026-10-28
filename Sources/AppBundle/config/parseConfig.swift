@@ -161,6 +161,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "compatibility-rules": Parser(\.compatibilityRules, parseCompatibilityRules),
     "workspace-rules-enabled": Parser(\.workspaceRulesEnabled, parseBool),
     "workspace-rules": Parser(\.workspaceRules, parseWorkspaceRules),
+    "focus-rules": Parser(\.focusRules, parseFocusRules),
 
     // Deprecated
     "non-empty-workspaces-root-containers-layout-on-startup": Parser(\._nonEmptyWorkspacesRootContainersLayoutOnStartup, parseStartupRootContainerLayout),

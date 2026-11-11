@@ -1133,6 +1133,50 @@ final class LaunchActivationPhaseOfflineCases {
 }
 
 
+/// `%{window-x}`, `%{window-y}`, `%{window-width}`, `%{window-height}` in `list-windows --format`.
+@MainActor
+final class WindowGeometryFormatOfflineCases {
+    let checks: CheckRunner
+    init(_ checks: CheckRunner) { self.checks = checks }
+    private let geometry: [FormatVar.WindowFormatVar] = [.windowX, .windowY, .windowWidth, .windowHeight]
+
+    func testVariablesParse() {
+        checks.expectEqual(geometry.map(\.rawValue), ["window-x", "window-y", "window-width", "window-height"])
+        for variable in geometry {
+            checks.expectEqual(FormatVar(rawValue: variable.rawValue), .window(variable))
+            checks.expectTrue(FormatVar.window(variable).isWindowGeometry)
+        }
+        for other in [FormatVar.window(.windowId), .window(.windowTitle), .app(.appPid), .workspace(.workspaceName)] {
+            checks.expectFalse(other.isWindowGeometry)
+        }
+    }
+
+    func testListWindowsAcceptsGeometryInFormatAndJson() throws {
+        let format = "%{window-id} %{window-x} %{window-y} %{window-width} %{window-height}"
+        let plain = try checks.require(parseCmdArgs(["list-windows", "--all", "--format", format].slice).cmdOrNil as? ListWindowsCmdArgs)
+        checks.expectEqual(plain.format.count, 9)
+        let json = try checks.require(parseCmdArgs(["list-windows", "--all", "--json", "--format", format].slice).cmdOrNil as? ListWindowsCmdArgs)
+        checks.expectTrue(json.json)
+        checks.expectEqual(json.format.compactMap { if case .interVar(let it) = $0 { it.rawValue } else { nil } },
+                       ["window-id", "window-x", "window-y", "window-width", "window-height"])
+    }
+
+    func testValuesAreIntegerPointsOfTheAxFrame() {
+        // A window on a secondary monitor left of and above the main one has negative coordinates
+        let rect = Rect(topLeftX: -1512, topLeftY: -38.4, width: 1440.6, height: 875)
+        checks.expectEqual(geometry.map { $0.geometryValue(rect)?.toString() }, ["-1512", "-38", "1441", "875"])
+        checks.expectEqual(geometry.map { $0.geometryValue(rect)?.kind }, [.int, .int, .int, .int])
+    }
+
+    func testMissingFrameIsNullString() {
+        checks.expectEqual(geometry.map { $0.geometryValue(nil)?.toString() },
+                       ["NULL-WINDOW-X", "NULL-WINDOW-Y", "NULL-WINDOW-WIDTH", "NULL-WINDOW-HEIGHT"])
+        checks.expectNil(FormatVar.WindowFormatVar.windowId.geometryValue(nil))
+        checks.expectNil(FormatVar.WindowFormatVar.windowTitle.geometryValue(Rect(topLeftX: 0, topLeftY: 0, width: 1, height: 1)))
+    }
+}
+
+
 @MainActor
 final class WorkspaceCreationConfigOfflineCases {
     let checks: CheckRunner
@@ -1785,6 +1829,7 @@ let restoreCases = WorkspaceRestoreOfflineCases(checks)
 let workspaceConfigCases = WorkspaceRulesConfigOfflineCases(checks)
 let focusConfigCases = FocusRulesConfigOfflineCases(checks)
 let launchPhaseCases = LaunchActivationPhaseOfflineCases(checks)
+let windowGeometryCases = WindowGeometryFormatOfflineCases(checks)
 let workspaceCreationCases = WorkspaceCreationConfigOfflineCases(checks)
 let workspaceEngineCases = WorkspaceRuleEngineOfflineCases(checks)
 let workspacePolicyCases = WorkspaceAffinityPolicyOfflineCases(checks)
@@ -1845,6 +1890,10 @@ checks.run("testFocusingAwayBeforeAnyWindowKeepsLaunching") { launchPhaseCases.t
 checks.run("testBackgroundWindowEndsLaunchOnNextFocusChange") { launchPhaseCases.testBackgroundWindowEndsLaunchOnNextFocusChange() }
 checks.run("testEmptyWorkspaceLeavesAppFocusedUntilUserMovesOn") { launchPhaseCases.testEmptyWorkspaceLeavesAppFocusedUntilUserMovesOn() }
 checks.run("testLaunchedNeverGoesBack") { launchPhaseCases.testLaunchedNeverGoesBack() }
+checks.run("testVariablesParse") { windowGeometryCases.testVariablesParse() }
+checks.run("testListWindowsAcceptsGeometryInFormatAndJson") { try windowGeometryCases.testListWindowsAcceptsGeometryInFormatAndJson() }
+checks.run("testValuesAreIntegerPointsOfTheAxFrame") { windowGeometryCases.testValuesAreIntegerPointsOfTheAxFrame() }
+checks.run("testMissingFrameIsNullString") { windowGeometryCases.testMissingFrameIsNullString() }
 checks.run("testSettingDefaultsToAutoAndAcceptsPersistentOnly") { workspaceCreationCases.testSettingDefaultsToAutoAndAcceptsPersistentOnly() }
 checks.run("testOnlyPersistentOrExistingNamesPassInPersistentOnlyMode") { workspaceCreationCases.testOnlyPersistentOrExistingNamesPassInPersistentOnlyMode() }
 checks.run("testExactAppIDAndFirstMatchingRuleWin") { workspaceEngineCases.testExactAppIDAndFirstMatchingRuleWin() }

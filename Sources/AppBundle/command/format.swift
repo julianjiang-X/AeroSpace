@@ -1,31 +1,62 @@
 import Common
 import Foundation
 
+/// A window with the values that need AX reads prefetched: the title and, for the geometry
+/// variables (`%{window-x}` ...), the frame
 struct WindowWithPrefetchedTitle {
     let window: Window
     let title: String?
+    let rect: Rect?
 
-    private init(window: Window, title: String?) {
+    private init(window: Window, title: String?, rect: Rect?) {
         self.window = window
         self.title = title
+        self.rect = rect
     }
 
     static func resolveWindow(_ window: Window, for formatVar: FormatVar, _ cm: CancellationMode) async throws -> Self {
-        try await resolveWindow(window, needsTitle: formatVar == .window(.windowTitle), cm)
+        try await resolveWindow(window, needsTitle: formatVar == .window(.windowTitle), needsRect: formatVar.isWindowGeometry, cm)
     }
 
     static func resolveWindow(_ window: Window, for format: [InterToken<InterVar>], _ cm: CancellationMode) async throws -> Self {
         let needsTitle = format.contains { $0 == .interVar(.formatVar(.window(.windowTitle))) }
-        return try await resolveWindow(window, needsTitle: needsTitle, cm)
+        let needsRect = format.contains { if case .interVar(.formatVar(let it)) = $0 { it.isWindowGeometry } else { false } }
+        return try await resolveWindow(window, needsTitle: needsTitle, needsRect: needsRect, cm)
     }
 
-    private static func resolveWindow(_ window: Window, needsTitle: Bool, _ cm: CancellationMode) async throws -> Self {
+    private static func resolveWindow(_ window: Window, needsTitle: Bool, needsRect: Bool, _ cm: CancellationMode) async throws -> Self {
         let title = needsTitle ? try await window.getTitle(cm) : nil
-        return .init(window: window, title: title)
+        let rect = needsRect ? try await window.getAxRect(cm) : nil
+        return .init(window: window, title: title, rect: rect)
     }
 
-    static func forTest(window: Window, title: String?) -> Self {
-        .init(window: window, title: title)
+    static func forTest(window: Window, title: String?, rect: Rect? = nil) -> Self {
+        .init(window: window, title: title, rect: rect)
+    }
+}
+
+extension FormatVar {
+    var isWindowGeometry: Bool {
+        if case .window(let it) = self { it.geometryValue(nil) != nil } else { false }
+    }
+}
+
+extension FormatVar.WindowFormatVar {
+    /// `%{window-x}`, `%{window-y}`, `%{window-width}`, `%{window-height}`: the window's frame as
+    /// macOS reports it via accessibility, in points, origin at the top-left corner of the main
+    /// screen (the one with the menu bar), y growing down. That is the coordinate space of
+    /// Chrome's `chrome.windows` `left`/`top`/`width`/`height`. Windows on hidden workspaces report
+    /// the corner AeroSpace parks them in. nil for the other variables
+    func geometryValue(_ rect: Rect?) -> Primitive? {
+        let value: CGFloat?
+        switch self {
+            case .windowX: value = rect?.topLeftX
+            case .windowY: value = rect?.topLeftY
+            case .windowWidth: value = rect?.width
+            case .windowHeight: value = rect?.height
+            case .windowId, .windowIsFullscreen, .windowTitle, .windowLayout, .windowParentContainerLayout: return nil
+        }
+        return value.flatMap { Int64(exactly: $0.rounded()) }.map { .int($0) } ?? .string("NULL-\(rawValue.uppercased())")
     }
 }
 
@@ -160,6 +191,7 @@ extension FormatVar {
                     case .windowIsFullscreen: .success(.bool(w.window.isFullscreen))
                     case .windowTitle: .success(.string(w.title.orDie("Title wasn't prefetched")))
                     case .windowLayout, .windowParentContainerLayout: toLayoutResult(w: w.window)
+                    case .windowX, .windowY, .windowWidth, .windowHeight: .success(f.geometryValue(w.rect).orDie())
                 }
             case (.workspace(let w), .workspace(let f)):
                 return switch f {

@@ -1,0 +1,165 @@
+{
+  "comment": "Fork features that script/sync-upstream.py protects. forkCommits: regexes over this fork's own commit subjects (files touched by matching commits belong to the feature). keywords: case-insensitive, multiline regexes over upstream commit messages and upstream doc additions; a hit stops the sync for discussion.",
+  "features": [
+    {
+      "id": "focus-rules",
+      "title": "[[focus-rules]]：ignore-activation / ignore-launch-activation（防跨工作区抢焦点）",
+      "docs": [
+        "docs/focus-rules.adoc"
+      ],
+      "forkCommits": [
+        "^\\w+\\(focus\\)",
+        "focus-rules",
+        "activation"
+      ],
+      "keywords": [
+        "focus[- ]?steal",
+        "steal(s|ing)? (the )?focus",
+        "\\bactivat(e|es|ed|ing|ion)\\b",
+        "\\bfrontmost\\b",
+        "focus[- ]rules?",
+        "native ?focus",
+        "didActivate",
+        "\\blaunch(es|ed|ing)?\\b.*\\b(app|focus|window)",
+        "focus[- ]?follows"
+      ]
+    },
+    {
+      "id": "workspace-creation",
+      "title": "workspace-creation = 'persistent-only'（只允许持久工作区）",
+      "docs": [
+        "docs/workspace-creation.adoc"
+      ],
+      "forkCommits": [
+        "workspace-creation",
+        "persistent-only"
+      ],
+      "keywords": [
+        "persistent[- ]workspaces?",
+        "workspace[- ]creation",
+        "\\bcreat(e|es|ed|ing) (a |the |new )?workspaces?",
+        "empty workspaces?",
+        "garbage[- ]collect",
+        "stub ?workspace",
+        "unbind.*workspace"
+      ]
+    },
+    {
+      "id": "workspace-ownership",
+      "title": "工作区规则 / affinity / 迁移日志（workspace rules + journal）",
+      "docs": [
+        "docs/workspace-ownership.adoc"
+      ],
+      "forkCommits": [
+        "ownership",
+        "workspace rules",
+        "affinity",
+        "journal",
+        "workspace transitions",
+        "migration"
+      ],
+      "keywords": [
+        "window[- ]rules?",
+        "workspace[- ]rules?",
+        "on-window-detected",
+        "for-next-detected-window",
+        "assign(ed|s)? (windows? )?to (a )?workspace",
+        "forceAssignedMonitor",
+        "workspace[- ]to[- ]monitor",
+        "affinity",
+        "\\bjournal"
+      ]
+    },
+    {
+      "id": "minimized-restore",
+      "title": "最小化窗口在显式切换工作区时恢复",
+      "docs": [
+        "docs/compatibility-workspace-restore.md"
+      ],
+      "forkCommits": [
+        "minimized"
+      ],
+      "keywords": [
+        "minimi[sz]",
+        "unminimi[sz]",
+        "restor(e|es|ed|ing) (the |a )?(minimi[sz]ed |hidden )?windows?"
+      ]
+    },
+    {
+      "id": "compatibility-rules",
+      "title": "兼容性规则（进程/窗口声明式规则、YAAGL/wine 游戏窗口识别）",
+      "docs": [],
+      "forkCommits": [
+        "^\\w+\\((compat|compatibility|yaagl|windows|permissions|debug)\\)",
+        "compatibility rules",
+        "YAAGL"
+      ],
+      "keywords": [
+        "\\bwine\\b",
+        "yaagl",
+        "\\bgames?\\b",
+        "popup",
+        "\\bdialog",
+        "window[- ]type",
+        "AxUiElementWindowType",
+        "window detection",
+        "launcher"
+      ]
+    },
+    {
+      "id": "window-geometry-format",
+      "title": "list-windows 几何格式变量 %{window-x/y/width/height}",
+      "docs": [
+        "docs/aerospace-list-windows.adoc"
+      ],
+      "forkCommits": [
+        "^\\w+\\(list-windows\\)",
+        "geometry"
+      ],
+      "keywords": [
+        "geometry",
+        "interpolation variables?",
+        "format variables?",
+        "%\\{window-",
+        "window[- ](rect|frame|position|size|bounds)s?\\b",
+        "list-windows"
+      ]
+    },
+    {
+      "id": "sticky",
+      "title": "（关注项）sticky / 跨工作区窗口 —— 与工作区归属规则相关",
+      "docs": [],
+      "forkCommits": [],
+      "keywords": [
+        "sticky",
+        "pin(ned)? windows?",
+        "(show|visible|stays?) on (all|every) workspaces?"
+      ]
+    },
+    {
+      "id": "branding-and-build",
+      "title": "本地版本号 / 构建方式（versionGenerated.swift、CLT 构建、离线检查）",
+      "docs": [],
+      "forkCommits": [
+        "^build[(:]",
+        "^test[(:]",
+        "offline checks",
+        "XCTest"
+      ],
+      "keywords": [
+        "versionGenerated",
+        "gitHashGenerated",
+        "build[- ]info",
+        "Mach-O section",
+        "SWIFT_TOOLCHAIN_VERSION",
+        "^Bump Swift$",
+        "swift toolchain",
+        "\\bswiftly\\b",
+        "swift-testing",
+        "XCTest",
+        "deployment target",
+        "swift-tools-version"
+      ]
+    }
+  ]
+}

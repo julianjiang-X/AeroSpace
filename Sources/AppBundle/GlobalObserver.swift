@@ -19,6 +19,12 @@ enum GlobalObserver {
         }
     }
 
+    /// Only feeds `ignore-launch-activation`; the activation of the next app triggers the refresh
+    private static func onDeactivateApp(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        MainActor.assumeIsolated { noteAppDeactivated(app) }
+    }
+
     private static func onHideApp(_ notification: Notification) {
         let notifName = notification.name.rawValue
         Task.startUnstructured { @MainActor in
@@ -48,6 +54,7 @@ enum GlobalObserver {
         let nc = NSWorkspace.shared.notificationCenter
         nc.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main, using: onNotif)
         nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main, using: onNotif)
+        nc.addObserver(forName: NSWorkspace.didDeactivateApplicationNotification, object: nil, queue: .main, using: onDeactivateApp)
         nc.addObserver(forName: NSWorkspace.didHideApplicationNotification, object: nil, queue: .main, using: onHideApp)
         nc.addObserver(forName: NSWorkspace.didUnhideApplicationNotification, object: nil, queue: .main, using: onNotif)
         nc.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main, using: onNotif)

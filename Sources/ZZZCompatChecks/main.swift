@@ -1029,6 +1029,7 @@ final class LaunchActivationPhaseOfflineCases {
     let checks: CheckRunner
     init(_ checks: CheckRunner) { self.checks = checks }
     private struct Observation {
+        var deactivated = false
         var holds = false
         var focusesWindow = false
         var hasWindow = false
@@ -1038,7 +1039,7 @@ final class LaunchActivationPhaseOfflineCases {
     private func run(_ start: LaunchActivationPhase, _ observations: [Observation]) -> [LaunchActivationPhase] {
         var phase = start
         return observations.map {
-            phase = phase.next(holdsNativeFocus: $0.holds, focusesWindow: $0.focusesWindow,
+            phase = phase.next(deactivated: $0.deactivated, holdsNativeFocus: $0.holds, focusesWindow: $0.focusesWindow,
                                hasWindow: $0.hasWindow, focusMovedToOtherWindow: $0.focusMoved)
             return phase
         }
@@ -1059,7 +1060,7 @@ final class LaunchActivationPhaseOfflineCases {
             // Its window appears and is natively focused: the activation that gets ignored
             .init(holds: true, focusesWindow: true, hasWindow: true),
             // AeroSpace handed native focus back to the previously focused window
-            .init(holds: false, hasWindow: true),
+            .init(deactivated: true, hasWindow: true),
             // Opened again right away: an ordinary activation
             .init(holds: true, focusesWindow: true, hasWindow: true),
         ])
@@ -1088,16 +1089,40 @@ final class LaunchActivationPhaseOfflineCases {
         checks.expectEqual(phases, [.launching, .launching, .launchingFocused])
     }
 
-    func testFocusingAwayBeforeAnyWindowKeepsLaunching() {
+    func testHandBackEndsLaunchEvenBeforeDeactivationIsReported() {
+        let phases = run(.launching, [
+            .init(holds: true, focusesWindow: true, hasWindow: true),
+            // The refresh after the hand-back can run before macOS's deactivation report
+            .init(holds: false, hasWindow: true),
+        ])
+        checks.expectEqual(phases, [.launchingFocused, .launched])
+    }
+
+    func testMovingOnWhileAppLoadsEndsLaunch() {
+        // Real check (Yaagl ZZZ OS, release 7): launched from a launcher, then the user focused
+        // another app before the launcher's window appeared. The window then showed in the
+        // background without activating, so the next activation is the user's and must follow
         let phases = run(.launching, [
             .init(holds: true),
-            // The user clicks another app while the launching app shows no window yet
-            .init(holds: false, focusMoved: true),
-            .init(holds: false),
-            // Its first window then activates itself: still the launch
+            // macOS reports the still windowless app deactivated
+            .init(deactivated: true),
+            // Its window appears in the background
+            .init(deactivated: true, hasWindow: true),
+            // Opened again: an ordinary activation
+            .init(deactivated: true, holds: true, focusesWindow: true, hasWindow: true),
+        ])
+        checks.expectEqual(phases, [.launching, .launched, .launched, .launched])
+    }
+
+    func testFocusChangesBeforeAppEverActivatedKeepLaunching() {
+        let phases = run(.launching, [
+            // Launched without activation (spawned by another process); other apps keep focus
+            .init(focusMoved: true),
+            .init(),
+            // Its first window then activates itself: the launch activation
             .init(holds: true, focusesWindow: true, hasWindow: true),
         ])
-        checks.expectEqual(phases, [.launching, .launching, .launching, .launchingFocused])
+        checks.expectEqual(phases, [.launching, .launching, .launchingFocused])
     }
 
     func testBackgroundWindowEndsLaunchOnNextFocusChange() {
@@ -1117,7 +1142,7 @@ final class LaunchActivationPhaseOfflineCases {
             // Nothing to hand focus back to: the app stays frontmost across refreshes
             .init(holds: true, focusesWindow: true, hasWindow: true),
             // The user focuses something else (for example the desktop)
-            .init(holds: false, hasWindow: true),
+            .init(deactivated: true, hasWindow: true),
         ])
         checks.expectEqual(phases, [.launchingFocused, .launchingFocused, .launched])
     }
@@ -1125,10 +1150,11 @@ final class LaunchActivationPhaseOfflineCases {
     func testLaunchedNeverGoesBack() {
         let phases = run(.launched, [
             .init(holds: true, focusesWindow: true, hasWindow: true),
+            .init(holds: true),
             .init(holds: false, hasWindow: true, focusMoved: true),
             .init(holds: true),
         ])
-        checks.expectEqual(phases, [.launched, .launched, .launched])
+        checks.expectEqual(phases, [.launched, .launched, .launched, .launched])
     }
 }
 
@@ -1886,7 +1912,9 @@ checks.run("testOnlyProcessesStartedAfterAeroSpaceAreLaunching") { launchPhaseCa
 checks.run("testLaunchEndsWhenAeroSpaceHandsFocusBack") { launchPhaseCases.testLaunchEndsWhenAeroSpaceHandsFocusBack() }
 checks.run("testRepeatedActivationsBeforeHandBackStayLaunching") { launchPhaseCases.testRepeatedActivationsBeforeHandBackStayLaunching() }
 checks.run("testBorderlessSplashKeepsLaunchUntilMainWindow") { launchPhaseCases.testBorderlessSplashKeepsLaunchUntilMainWindow() }
-checks.run("testFocusingAwayBeforeAnyWindowKeepsLaunching") { launchPhaseCases.testFocusingAwayBeforeAnyWindowKeepsLaunching() }
+checks.run("testHandBackEndsLaunchEvenBeforeDeactivationIsReported") { launchPhaseCases.testHandBackEndsLaunchEvenBeforeDeactivationIsReported() }
+checks.run("testMovingOnWhileAppLoadsEndsLaunch") { launchPhaseCases.testMovingOnWhileAppLoadsEndsLaunch() }
+checks.run("testFocusChangesBeforeAppEverActivatedKeepLaunching") { launchPhaseCases.testFocusChangesBeforeAppEverActivatedKeepLaunching() }
 checks.run("testBackgroundWindowEndsLaunchOnNextFocusChange") { launchPhaseCases.testBackgroundWindowEndsLaunchOnNextFocusChange() }
 checks.run("testEmptyWorkspaceLeavesAppFocusedUntilUserMovesOn") { launchPhaseCases.testEmptyWorkspaceLeavesAppFocusedUntilUserMovesOn() }
 checks.run("testLaunchedNeverGoesBack") { launchPhaseCases.testLaunchedNeverGoesBack() }

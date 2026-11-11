@@ -19,16 +19,17 @@ struct FocusRule: Equatable {
 }
 
 /// Where an app is in its launch, for `ignore-launch-activation`. Every refresh session advances
-/// it from what holds native focus at that moment; no timers are involved.
+/// it from macOS's activation reports and what holds native focus at that moment; no timers are
+/// involved.
 ///
-/// The launch ends at the first native focus change after the app has shown a window:
-/// either the app loses native focus after one of its windows held it (AeroSpace handing focus
-/// back from an ignored activation counts, so a launch normally ends right after it), or native
-/// focus moves to another app's window while the app's window sits in the background unfocused.
+/// The launch ends the first time the app stops being the active app: macOS reports it deactivated
+/// (AeroSpace handing focus back from the ignored activation counts, and so does you focusing
+/// something else while the app is still loading, before it has shown a window). As a fallback for
+/// apps that were never activated, it also ends when native focus moves to another app's window
+/// while the app's window sits unfocused in the background.
 enum LaunchActivationPhase: Equatable, Sendable {
-    /// The process started while AeroSpace was running and none of its windows has held native
-    /// focus yet. Holding native focus without a window, or with a popup (a borderless splash
-    /// screen), stays here.
+    /// The process started while AeroSpace was running and hasn't been deactivated yet. Holding
+    /// native focus without a window, or with a popup (a borderless splash screen), stays here.
     case launching
     /// One of its windows has held native focus (accepted, or ignored and handed back). The
     /// launch ends as soon as the app no longer holds native focus.
@@ -42,11 +43,13 @@ enum LaunchActivationPhase: Equatable, Sendable {
     var isLaunching: Bool { self != .launched }
 
     /// - Parameters:
+    ///   - deactivated: macOS has reported the app deactivated since its process started
     ///   - holdsNativeFocus: the app is the one macOS considers focused
     ///   - focusesWindow: the app's natively focused window is one AeroSpace manages on a workspace
     ///   - hasWindow: AeroSpace manages at least one window of the app on a workspace
     ///   - focusMovedToOtherWindow: native focus has just moved to another app's window
-    func next(holdsNativeFocus: Bool, focusesWindow: Bool, hasWindow: Bool, focusMovedToOtherWindow: Bool) -> Self {
+    func next(deactivated: Bool, holdsNativeFocus: Bool, focusesWindow: Bool, hasWindow: Bool, focusMovedToOtherWindow: Bool) -> Self {
+        if deactivated { return .launched }
         switch self {
             case .launching:
                 if holdsNativeFocus { return focusesWindow ? .launchingFocused : .launching }

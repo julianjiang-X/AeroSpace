@@ -64,25 +64,26 @@ policy = 'ignore-launch-activation'
 `if.workspace` matches the window's workspace at activation time, after `on-window-detected`
 has moved it, so one rule covers every window that lands there.
 
-An app is launching from the moment its process starts until the first native focus change
-after it has shown a window:
+An app is launching from the moment its process starts until it stops being the active app for
+the first time, which macOS reports as a deactivation:
 
-* it loses native focus after one of its windows held it. AeroSpace handing focus back from
-  the ignored activation counts, so the launch normally ends right after that activation.
-  If the app activates itself again after that, it is followed;
-* or native focus moves to another app's window while the app's window sits unfocused in the
-  background (the app launched without activating it).
+* AeroSpace handing focus back from the ignored activation deactivates it, so the launch normally
+  ends right after that activation. If the app activates itself again after that, it is followed.
+* Focusing something else while the app is still loading, before it shows a window, also ends the
+  launch. Its window then appears in the background, and the next activation is followed.
+* An app that was never activated (started in the background, or spawned by another program)
+  stays launching until native focus moves to another app's window after its own window appeared.
 
 Consequences:
 
 * Apps that were already running when AeroSpace started are not launching.
 * A borderless splash screen doesn't end the launch: AeroSpace treats it as a popup, not as a
-  window, so the main window that follows is still the launch activation and is ignored. A splash that is a
-  regular window on a matching workspace is the launch activation itself: AeroSpace hands focus
-  back, and if the app then activates its main window, that activation is followed.
+  window, and the app stays active, so the main window that follows is still the launch
+  activation and is ignored. A splash that is a regular window on a matching workspace is the
+  launch activation itself: AeroSpace hands focus back, and if the app then activates its main
+  window, that activation is followed.
 * If the focused workspace has no window, there is nothing to hand focus back to: the app keeps
   native focus and keyboard input, and its launch ends when you focus something else.
-* An app whose window appeared in the background without ever holding native focus is still
-  launching until native focus changes. Activating it from another workspace before anything else
-  takes focus counts as its launch activation: you stay where you are, and the next activation
-  is followed.
+* An app that was never activated and whose window appeared without any focus change afterwards
+  is still launching: the first time you activate it from another workspace you stay where you
+  are, and the next activation is followed.

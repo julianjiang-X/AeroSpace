@@ -61,10 +61,31 @@ import AppKit
     for app in launching {
         let holdsNativeFocus = app.pid == focusedPid
         app.launchActivationPhase = app.launchActivationPhase.next(
+            deactivated: wasDeactivated(app.pid) || wasDeactivated(app.nsApp.processIdentifier),
             holdsNativeFocus: holdsNativeFocus,
             focusesWindow: holdsNativeFocus && nativeFocused?.nodeWorkspace != nil,
             hasWindow: appsWithWindows.contains(app.pid),
             focusMovedToOtherWindow: !holdsNativeFocus && focusMoved,
         )
     }
+}
+
+/// Processes macOS reported deactivated, with their start stamp so a reused pid doesn't inherit it
+@MainActor private var deactivatedProcesses: [pid_t: WorkspaceAffinityNativeSnapshot.ProcessStamp] = [:]
+
+/// `NSWorkspace.didDeactivateApplicationNotification`: ends the launch of `ignore-launch-activation`,
+/// even when it arrives before AeroSpace has registered the app (no window yet)
+@MainActor func noteAppDeactivated(_ app: NSRunningApplication) {
+    let pids = Set([app.processIdentifier, MacApp.resolvedNativePID(app)].compactMap { $0 })
+    for pid in pids {
+        if let stamp = WorkspaceAffinityNativeSnapshot.processStamp(pid) { deactivatedProcesses[pid] = stamp }
+    }
+    if deactivatedProcesses.count > 256 {
+        deactivatedProcesses = deactivatedProcesses.filter { WorkspaceAffinityNativeSnapshot.processStamp($0.key) == $0.value }
+    }
+}
+
+@MainActor private func wasDeactivated(_ pid: pid_t) -> Bool {
+    guard let stamp = deactivatedProcesses[pid] else { return false }
+    return WorkspaceAffinityNativeSnapshot.processStamp(pid) == stamp
 }

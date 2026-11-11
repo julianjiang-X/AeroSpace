@@ -41,3 +41,24 @@ the workspace still doesn't change, but keyboard input goes to the matching app
 until you focus something else.
 
 An app that re-activates itself continuously is pushed back each time.
+
+`ignore-launch-activation`:: The same, but only within 10 seconds of AeroSpace first seeing the
+window. Launching an app (it activates its new window) leaves you where you are; activating it
+again later, for example by opening it from a launcher, takes you to its workspace as usual.
+Combined with `on-window-detected` moving the window, a launched app lands on its own workspace
+in the background:
+
+[source,toml]
+----
+[[on-window-detected]]
+    if.app-id = 'com.example.game-launcher'
+    run = 'move-node-to-workspace GAME'
+
+[[focus-rules]]
+id = 'game-launch'
+if.workspace = 'GAME'
+policy = 'ignore-launch-activation'
+----
+
+`if.workspace` matches the window's workspace at activation time, after `on-window-detected`
+has moved it, so one rule covers every window that lands there.

@@ -45,7 +45,7 @@ private func parseFocusRule(_ raw: OrderedJson, _ path: ConfigBacktrace, _ c: in
     var policy: FocusRule.Policy? = nil
     if let raw = table["policy"] {
         policy = parseString(raw, path + .key("policy")).flatMap {
-            FocusRule.Policy(rawValue: $0).toResult(.init(path + .key("policy"), "Expected one of: ignore-activation"))
+            FocusRule.Policy(rawValue: $0).toResult(.init(path + .key("policy"), "Expected one of: ignore-activation, ignore-launch-activation"))
         }.getOrNil(appendErrorTo: &local.errors)
     } else {
         local.errors.append(.init(path + .key("policy"), "'policy' is mandatory"))

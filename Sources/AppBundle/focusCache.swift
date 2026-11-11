@@ -24,12 +24,31 @@
 /// `[[focus-rules]]` with `policy = 'ignore-activation'`: when macOS focuses a matching window
 /// on another workspace (typically an app activating its own new window), keep AeroSpace's
 /// focus and hand native focus back to the focused window. Call before updateFocusCache.
+@MainActor private var windowFirstSeen: [UInt32: ContinuousClock.Instant] = [:]
+let launchActivationGrace: Duration = .seconds(10)
+
+/// Called when a window is registered; `ignore-launch-activation` measures from here
+@MainActor func noteWindowFirstSeen(_ windowId: UInt32) {
+    let now = ContinuousClock.now
+    windowFirstSeen = windowFirstSeen.filter { now - $0.value < launchActivationGrace }
+    windowFirstSeen[windowId] = now
+}
+
+func isLaunchActivation(firstSeen: ContinuousClock.Instant?, now: ContinuousClock.Instant) -> Bool {
+    guard let firstSeen else { return false }
+    return now - firstSeen < launchActivationGrace
+}
+
 @MainActor func ignoresNativeActivation(_ nativeFocused: Window?) async -> Bool {
     guard let nativeFocused, nativeFocused.windowId != lastKnownNativeFocusedWindowId,
           let workspace = nativeFocused.nodeWorkspace, workspace != focus.workspace else { return false }
     for rule in config.focusRules where await rule.matcher.matches(nativeFocused) {
         switch rule.policy {
             case .ignoreActivation:
+                focus.windowOrNil?.nativeFocus()
+                return true
+            case .ignoreLaunchActivation:
+                guard isLaunchActivation(firstSeen: windowFirstSeen[nativeFocused.windowId], now: .now) else { return false }
                 focus.windowOrNil?.nativeFocus()
                 return true
         }

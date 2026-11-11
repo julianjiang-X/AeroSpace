@@ -988,6 +988,21 @@ final class FocusRulesConfigOfflineCases {
         checks.expectEqual(parked.matcher.workspace, "Emu")
     }
 
+    func testLaunchOnlyPolicyParses() {
+        let result = parse(testHostRule.replacingOccurrences(of: "'ignore-activation'", with: "'ignore-launch-activation'"))
+        checks.expectTrue(result.errors.isEmpty, "\(result.errors)")
+        checks.expectEqual(result.config.focusRules.first?.policy, .ignoreLaunchActivation)
+    }
+
+    func testLaunchActivationWindowIsTenSeconds() {
+        let seen = ContinuousClock.now
+        checks.expectFalse(isLaunchActivation(firstSeen: nil, now: seen))
+        checks.expectTrue(isLaunchActivation(firstSeen: seen, now: seen))
+        checks.expectTrue(isLaunchActivation(firstSeen: seen, now: seen + .milliseconds(9_900)))
+        checks.expectFalse(isLaunchActivation(firstSeen: seen, now: seen + .seconds(10)))
+        checks.expectFalse(isLaunchActivation(firstSeen: seen, now: seen + .seconds(60)))
+    }
+
     func testRequiredFieldsAreStrict() {
         for field in ["id = 'test-host'\n", "if.app-name-regex-substring = '^dmhost$'\n", "policy = 'ignore-activation'"] {
             let result = parse(testHostRule.replacingOccurrences(of: field, with: ""))
@@ -1717,6 +1732,8 @@ checks.run("testOnlyExactIdentityAnchorsAreAccepted") { workspaceConfigCases.tes
 checks.run("testWorkspaceAndOptionalMatchFieldsAreStrict") { workspaceConfigCases.testWorkspaceAndOptionalMatchFieldsAreStrict() }
 checks.run("testWorkspaceRuleUpdatesDoNotAcquireCompatibilityRestartLock") { workspaceConfigCases.testWorkspaceRuleUpdatesDoNotAcquireCompatibilityRestartLock() }
 checks.run("testRulesAreOptionalAndParsedInOrder") { focusConfigCases.testRulesAreOptionalAndParsedInOrder() }
+checks.run("testLaunchOnlyPolicyParses") { focusConfigCases.testLaunchOnlyPolicyParses() }
+checks.run("testLaunchActivationWindowIsTenSeconds") { focusConfigCases.testLaunchActivationWindowIsTenSeconds() }
 checks.run("testRequiredFieldsAreStrict") { focusConfigCases.testRequiredFieldsAreStrict() }
 checks.run("testInvalidValuesRejectTheRule") { focusConfigCases.testInvalidValuesRejectTheRule() }
 checks.run("testSettingDefaultsToAutoAndAcceptsPersistentOnly") { workspaceCreationCases.testSettingDefaultsToAutoAndAcceptsPersistentOnly() }

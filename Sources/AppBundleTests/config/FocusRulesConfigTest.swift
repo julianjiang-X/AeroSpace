@@ -48,15 +48,6 @@ final class FocusRulesConfigTest: XCTestCase {
         XCTAssertEqual(result.config.focusRules.first?.policy, .ignoreLaunchActivation)
     }
 
-    func testLaunchActivationWindowIsTenSeconds() {
-        let seen = ContinuousClock.now
-        XCTAssertFalse(isLaunchActivation(firstSeen: nil, now: seen))
-        XCTAssertTrue(isLaunchActivation(firstSeen: seen, now: seen))
-        XCTAssertTrue(isLaunchActivation(firstSeen: seen, now: seen + .milliseconds(9_900)))
-        XCTAssertFalse(isLaunchActivation(firstSeen: seen, now: seen + .seconds(10)))
-        XCTAssertFalse(isLaunchActivation(firstSeen: seen, now: seen + .seconds(60)))
-    }
-
     func testRequiredFieldsAreStrict() {
         for field in ["id = 'test-host'\n", "if.app-name-regex-substring = '^dmhost$'\n", "policy = 'ignore-activation'"] {
             let result = parse(testHostRule.replacingOccurrences(of: field, with: ""))

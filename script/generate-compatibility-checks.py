@@ -18,6 +18,7 @@ case_specs = [
     ("WorkspaceMinimizedRestorePolicyTest.swift", "WorkspaceMinimizedRestorePolicyTest", "WorkspaceRestoreOfflineCases", "restoreCases"),
     ("config/WorkspaceRulesConfigTest.swift", "WorkspaceRulesConfigTest", "WorkspaceRulesConfigOfflineCases", "workspaceConfigCases"),
     ("config/FocusRulesConfigTest.swift", "FocusRulesConfigTest", "FocusRulesConfigOfflineCases", "focusConfigCases"),
+    ("LaunchActivationPhaseTest.swift", "LaunchActivationPhaseTest", "LaunchActivationPhaseOfflineCases", "launchPhaseCases"),
     ("config/WorkspaceCreationConfigTest.swift", "WorkspaceCreationConfigTest", "WorkspaceCreationConfigOfflineCases", "workspaceCreationCases"),
     ("WorkspaceRuleEngineTest.swift", "WorkspaceRuleEngineTest", "WorkspaceRuleEngineOfflineCases", "workspaceEngineCases"),
     ("WorkspaceAffinityPolicyTest.swift", "WorkspaceAffinityPolicyTest", "WorkspaceAffinityPolicyOfflineCases", "workspacePolicyCases"),

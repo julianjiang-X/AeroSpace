@@ -16,6 +16,8 @@ final class MacApp: AbstractApp {
     private let windows: ThreadGuardedValue<[UInt32: AxWindow]> = .init([:])
     private var windowsCount = 0
     var lastNativeFocusedWindowId: UInt32? = nil
+    /// `ignore-launch-activation`. Advanced on the main actor by every refresh session
+    var launchActivationPhase: LaunchActivationPhase
     private var thread: Thread?
     private var setFrameJobs: [UInt32: RunLoopJob] = [:]
     @MainActor private static var focusJob: RunLoopJob? = nil
@@ -44,6 +46,7 @@ final class MacApp: AbstractApp {
         self.windowCompatibilityRules = windowCompatibilityRules
         self.rawAppBundleId = nsApp.bundleIdentifier
         self.appId = nsApp.bundleIdentifier.flatMap { KnownBundleId.init(rawValue: $0) }
+        self.launchActivationPhase = .init(startedAfterServer: processStartedAfterServer(process.pid))
         assert(!axSubscriptions.isEmpty)
         self.appAxSubscriptions = .init(axSubscriptions)
         self.thread = thread
@@ -579,6 +582,14 @@ extension [UInt32: AxWindow] {
             return nil
         }
     }
+}
+
+private let serverProcessStamp = WorkspaceAffinityNativeSnapshot.processStamp(myPid)
+
+/// Kernel process start times, so apps already running when AeroSpace starts don't count as launching
+private func processStartedAfterServer(_ pid: pid_t) -> Bool {
+    guard let server = serverProcessStamp, let app = WorkspaceAffinityNativeSnapshot.processStamp(pid) else { return false }
+    return (app.seconds, app.microseconds) > (server.seconds, server.microseconds)
 }
 
 private func getAxRect(window: AXUIElement, job: RunLoopJob) throws -> Rect? {
